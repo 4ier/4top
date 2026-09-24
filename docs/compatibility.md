@@ -29,12 +29,24 @@ caller's complete environment. A one-off sandbox/permission flag passed to
 `4top new` is not a persistent 4top resume policy. Inspect native permissions
 before submitting another task. 4top adds no permission-bypass flags itself.
 
+## Linux exit observations
+
+Hosted Ubuntu/tmux 3.4 diagnostics exposed exited children retained as zombies
+while tmux had no exit status. After matching the exact owned pane and server,
+4top can confirm the same boot/PID/start-time zombie using `/proc/PID/stat`.
+Nonzero kernel wait status provides the exit code/signal; zero remains unknown
+because proc permissions can mask that field. No tmux-server signal or child
+reaping is performed. Missing/ambiguous identity stays UNKNOWN and blocks resume.
+
+The kernel field contract is documented by Linux man-pages:
+https://man7.org/linux/man-pages/man5/proc_pid_stat.5.html
+
 ## Platform evidence
 
 - Root package target: Python >=3.11, macOS/Linux. Core session-ls: Python >=3.9.
 - Runtime target: tmux >=3.3. Not every minimum version is certified.
 - **Developer Mac:** macOS 27.0 arm64, Python 3.13.13, tmux 3.6b, Textual 8.2.8.
-  **117 automated tests passed, zero failures/errors/skips**, plus the separate
+  **138 automated tests passed, zero failures/errors/skips**, plus the separate
   real native checks above and a clean virtual-environment wheel installation.
 - **Earlier 0.1.0a1 container run:** Linux x86_64, Python 3.13.5, tmux 3.4,
   Textual 8.2.8; 96 automated tests. This is historical evidence, not a Linux

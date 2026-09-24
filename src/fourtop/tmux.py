@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from session_ls.api import is_uuid, utc_now
@@ -50,6 +51,45 @@ def process_identity(pid: int) -> str | None:
                 return None
             return f"ps:{pid}:{identity.strip()}"
     except (OSError, IndexError, subprocess.TimeoutExpired):
+        pass
+    return None
+
+
+
+def linux_zombie_exit(pid: int, expected_identity: str | None,
+                      proc_root: Path = Path("/proc")) -> tuple[int | None, str | None] | None:
+    """Read a proven zombie's exit, without sending signals or reaping children.
+
+    The caller must already verify tmux server/pane ownership. Linux /proc stat
+    fields 3/22/52 carry state/start time/wait status. Field 52 can be zeroed by
+    ptrace restrictions, so zero proves neither success nor failure here.
+    """
+    if type(pid) is not int or pid <= 0 or not expected_identity:
+        return None
+    try:
+        with (proc_root / str(pid) / "stat").open() as stream:
+            if os.fstat(stream.fileno()).st_uid != os.getuid():
+                return None
+            text = stream.read(16384)
+        prefix, separator, suffix = text.rpartition(")")
+        fields = suffix.split()
+        if not separator or len(fields) < 50 or fields[0] != "Z":
+            return None
+        if int(prefix.partition("(")[0].strip()) != pid or not fields[19].isdigit():
+            return None
+        boot = (proc_root / "sys/kernel/random/boot_id").read_text().strip()
+        if f"linux:{boot}:{pid}:{fields[19]}" != expected_identity:
+            return None
+        status = int(fields[49])
+        if not 0 <= status <= 65535:
+            return None
+        if status == 0:
+            return None, None  # Confirmed exit, but possibly permission-masked status.
+        if os.WIFEXITED(status):
+            return os.WEXITSTATUS(status), None
+        if os.WIFSIGNALED(status):
+            return None, str(os.WTERMSIG(status))
+    except (OSError, ValueError, IndexError):
         pass
     return None
 
@@ -166,6 +206,13 @@ class Tmux:
             # tmux can close the PTY before reaping its child (notably 3.4/Linux).
             # pane_dead alone is not evidence that the native process exited.
             if pane.exit_code is None and not pane.exit_signal:
+                # Some Linux tmux builds leave a zombie without collecting SIGCHLD.
+                # Check boot/PID/start time again; never substitute a cwd/time guess.
+                evidence = (linux_zombie_exit(pane.pid, record.get("process_identity"))
+                            if sys.platform.startswith("linux") else None)
+                if evidence is not None:
+                    pane = replace(pane, exit_code=evidence[0], exit_signal=evidence[1])
+                    return "EXIT", pane, "Exit confirmed by Linux kernel; tmux has not reaped the child"
                 return "UNKNOWN", pane, "Terminal closed; tmux has not yet reported the process exit"
             return "EXIT", pane, None
         identity = process_identity(pane.pid)

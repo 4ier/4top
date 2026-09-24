@@ -17,8 +17,11 @@ The unchanged 0.1.0a1 source first passed all 96 tests on this Mac. Native
 verification then exposed a configuration-root bug. After the fix and 13 new
 root regression cases, 109 tests passed. The first hosted Ubuntu run then exposed
 a PTY-close/child-reap race. The observer now requires an exit code or signal
-before reporting EXIT, with eight further regression cases. The final developer
-Mac suite passed **117 tests**, with **zero failures, errors or skips**. Ruff passed.
+before reporting EXIT, with eight further regression cases. Additional Linux diagnostics identified
+unreaped zombies; a read-only kernel-evidence fallback gained 21 further cases
+covering exact identity, ownership, masked status and refusal of live processes.
+The final developer
+Mac suite passed **138 tests**, with **zero failures, errors or skips**. Ruff passed.
 
 Reproduce with both packages installed and tmux available:
 

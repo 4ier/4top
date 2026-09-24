@@ -45,6 +45,12 @@ jobs:
           python -m pytest -p pytest_asyncio.plugin tests/unit tests/tui packages/session-ls/tests --junitxml=unit.xml
       - name: Real tmux / PTY tests (synthetic agents, no credentials)
         run: python -m pytest -p pytest_asyncio.plugin tests/integration --junitxml=runtime.xml
+      - name: Repeat Linux exit and handoff regressions
+        if: runner.os == 'Linux'
+        run: |
+          for attempt in 1 2 3 4 5; do
+            python -m pytest -p pytest_asyncio.plugin -q tests/integration/test_runtime.py -k 'instant_exit or handoff_faults or signalled_exit'
+          done
       - name: Build both distributions
         run: |
           python -m build --no-isolation packages/session-ls --outdir dist
