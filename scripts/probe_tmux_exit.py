@@ -25,11 +25,14 @@ try:
                 "dead=#{pane_dead}|status=#{pane_dead_status}|signal=#{pane_dead_signal}|time=#{pane_dead_time}|pid=#{pane_pid}"])
             status = lab.manager.tmux.observe(run)
             proc = Path(f"/proc/{run['pid']}/stat")
+            fields = proc.read_text().rsplit(")", 1)[1].split() if proc.exists() else []
+            process = {"state": fields[0], "parent_pid": fields[1],
+                       "kernel_exit_status": fields[49] if len(fields) > 49 else None} if fields else None
             # Only the disposable synthetic process's status and its empty project output.
             print(json.dumps({"mode":mode,"delay":delay,"tmux_raw":raw.stdout,
                 "state":status[0],"issue":status[2],
                 "pane":str(status[1]),
-                "process_present":proc.exists(),
+                "process_present":proc.exists(), "kernel_process":process,
                 "capture":lab.manager.tmux.command(["capture-pane","-p","-t",run["tmux"]["pane"]]).stdout.strip()}))
 finally:
     try:
