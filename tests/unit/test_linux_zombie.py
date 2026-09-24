@@ -1,4 +1,5 @@
 """Exact kernel exit evidence; no signals, guessed identity or masked success."""
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ def make_proc(root: Path, state="Z", status="1792", start="4242", pid=123):
     path.parent.mkdir(parents=True, exist_ok=True)
     # A legal comm containing spaces and parentheses must not shift field offsets.
     path.write_text(f"{pid} (agent ) name) " + " ".join(fields) + "\n")
+    (root / "123/status").write_text("Uid:\t" + "\t".join([str(os.getuid())] * 4) + "\n")
     boot = root / "sys/kernel/random/boot_id"
     boot.parent.mkdir(parents=True, exist_ok=True)
     boot.write_text("test-boot\n")
@@ -39,9 +41,8 @@ def test_kernel_exit_rejects_missing_or_reused_identity(tmp_path, identity):
     assert linux_zombie_exit(123, identity, tmp_path) is None
 
 
-@pytest.mark.parametrize("damage", ["missing", "truncated", "other-pid", "wrong-owner"])
+@pytest.mark.parametrize("damage", ["missing", "truncated", "other-pid", "wrong-owner", "missing-uid", "partial-uid"])
 def test_kernel_exit_fails_closed_on_untrusted_proc(tmp_path, monkeypatch, damage):
-    import fourtop.tmux as module
     identity = make_proc(tmp_path)
     path = tmp_path / "123/stat"
     if damage == "missing":
@@ -50,9 +51,12 @@ def test_kernel_exit_fails_closed_on_untrusted_proc(tmp_path, monkeypatch, damag
         path.write_text("123 (agent) Z 1")
     elif damage == "other-pid":
         make_proc(tmp_path, pid=124)
+    elif damage == "wrong-owner":
+        (tmp_path / "123/status").write_text("Uid:\t" + "\t".join([str(os.getuid() + 1)] * 4))
+    elif damage == "missing-uid":
+        (tmp_path / "123/status").write_text("State:\tZ\n")
     else:
-        uid = module.os.getuid()
-        monkeypatch.setattr(module.os, "fstat", lambda fd: SimpleNamespace(st_uid=uid + 1))
+        (tmp_path / "123/status").write_text(f"Uid:\t{os.getuid()}\n")
     assert linux_zombie_exit(123, identity, tmp_path) is None
 
 
@@ -72,3 +76,11 @@ def test_verified_zombie_can_close_the_exit_evidence_gap(lab, monkeypatch):
     state, observed, issue = lab.manager.tmux.observe(run, snapshot)
     assert state == "EXIT" and observed.exit_code == 7
     assert "Linux kernel" in issue
+
+
+def test_proc_inode_owner_is_not_process_identity(tmp_path, monkeypatch):
+    import fourtop.tmux as module
+    identity = make_proc(tmp_path)
+    # Changing inode ownership metadata cannot override the actual Uid fields.
+    monkeypatch.setattr(module.os, "fstat", lambda fd: SimpleNamespace(st_uid=0))
+    assert linux_zombie_exit(123, identity, tmp_path) == (7, None)

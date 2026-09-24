@@ -18,10 +18,10 @@ verification then exposed a configuration-root bug. After the fix and 13 new
 root regression cases, 109 tests passed. The first hosted Ubuntu run then exposed
 a PTY-close/child-reap race. The observer now requires an exit code or signal
 before reporting EXIT, with eight further regression cases. Additional Linux diagnostics identified
-unreaped zombies; a read-only kernel-evidence fallback gained 21 further cases
+unreaped zombies; a read-only kernel-evidence fallback gained 24 further cases
 covering exact identity, ownership, masked status and refusal of live processes.
 The final developer
-Mac suite passed **138 tests**, with **zero failures, errors or skips**. Ruff passed.
+Mac suite passed **141 tests**, with **zero failures, errors or skips**. Ruff passed.
 
 Reproduce with both packages installed and tmux available:
 

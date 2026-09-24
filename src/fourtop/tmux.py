@@ -67,9 +67,13 @@ def linux_zombie_exit(pid: int, expected_identity: str | None,
     if type(pid) is not int or pid <= 0 or not expected_identity:
         return None
     try:
+        # /proc inode ownership can become root when a process is not dumpable.
+        # It is not the process UID. Check all four kernel credential fields.
+        status_lines = (proc_root / str(pid) / "status").read_text().splitlines()
+        uid_lines = [line.split()[1:] for line in status_lines if line.startswith("Uid:")]
+        if len(uid_lines) != 1 or uid_lines[0] != [str(os.getuid())] * 4:
+            return None
         with (proc_root / str(pid) / "stat").open() as stream:
-            if os.fstat(stream.fileno()).st_uid != os.getuid():
-                return None
             text = stream.read(16384)
         prefix, separator, suffix = text.rpartition(")")
         fields = suffix.split()

@@ -7,14 +7,14 @@
   for an already-authenticated installation. Explicit profiles still take priority.
 - Add 13 native-root regression cases covering all three runtime drivers.
 - Explain that resume uses current native configuration, not replayed launch flags.
-- Validate 138 automated tests on macOS 27.0 arm64, plus separate authenticated
+- Validate 141 automated tests on macOS 27.0 arm64, plus separate authenticated
   Claude Code 2.1.280 and Codex 0.155.1 attach/detach/resize/exact-resume smoke checks.
 - Require confirmed tmux exit code/signal before classifying a closed pane as EXIT;
   add eight regression cases for the Linux PTY-close/child-reap race and signal exits.
 - Recover Linux zombie exit evidence by matching boot/PID/start time and current
   ownership before reading kernel wait status. Never send signals to the tmux
   server or guess a successful zero status when /proc may have masked it.
-  Add 21 regression cases for PID reuse, ownership, malformed data and live states.
+  Add 24 regression cases for PID reuse, ownership, malformed data and live states.
 - Establish the independent `4ier/4top` repository and fresh-wheel installation.
 - Keep Pi, other native versions, physical SSH loss and Linux native validation
   explicitly outside this release's compatibility evidence.
