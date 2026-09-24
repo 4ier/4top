@@ -27,7 +27,7 @@ PANE_RE = re.compile(r"%\d+\Z")
 TTY_RE = re.compile(r"/dev/[a-zA-Z0-9/_-]+\Z")
 FORMAT = "\t".join("#{" + field + "}" for field in (
     "session_id", "window_id", "pane_id", "pane_pid", "pane_dead", "pane_dead_status",
-    "session_attached", "@4top_run_id", "@4top_host_id", "@4top_agent", "@4top_ready", "pid"))
+    "session_attached", "@4top_run_id", "@4top_host_id", "@4top_agent", "@4top_ready", "pid", "pane_dead_signal"))
 
 
 def process_identity(pid: int) -> str | None:
@@ -123,15 +123,16 @@ class Tmux:
             server_pid = None
             for line in response.stdout.splitlines():
                 fields = line.split("\t")
-                if len(fields) != 12:
+                if len(fields) != 13:
                     raise ValueError("Malformed tmux observation")
-                session, window, pane, pid, dead, status_code, clients, run_id, host, agent, ready, server = fields
+                (session, window, pane, pid, dead, status_code, clients, run_id,
+                 host, agent, ready, server, exit_signal) = fields
                 if not re.fullmatch(r"\$\d+", session) or not re.fullmatch(r"@\d+", window) or not PANE_RE.fullmatch(pane):
                     raise ValueError("Invalid tmux target")
                 server_pid = int(server)
                 panes.append(Pane(session, window, pane, int(pid), dead == "1",
                                   int(status_code) if status_code.isdigit() else None,
-                                  int(clients), run_id, host, agent, ready == "1"))
+                                  int(clients), run_id, host, agent, ready == "1", exit_signal or None))
             identity = self.server_identity(server_pid) if server_pid else ""
             return TmuxSnapshot(tuple(panes), identity, observed)
         except (FourtopError, OSError, ValueError) as exc:
@@ -162,6 +163,10 @@ class Tmux:
         if pane.pid != record.get("pid"):
             return "UNKNOWN", pane, "Pane was respawned; it no longer contains the recorded process"
         if pane.dead:
+            # tmux can close the PTY before reaping its child (notably 3.4/Linux).
+            # pane_dead alone is not evidence that the native process exited.
+            if pane.exit_code is None and not pane.exit_signal:
+                return "UNKNOWN", pane, "Terminal closed; tmux has not yet reported the process exit"
             return "EXIT", pane, None
         identity = process_identity(pane.pid)
         if identity is None or identity != record.get("process_identity"):

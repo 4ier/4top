@@ -5,13 +5,13 @@
   "tmux": "tmux 3.6b",
   "textual": "8.2.8",
   "counts": {
-    "tests": 109,
+    "tests": 117,
     "failures": 0,
     "errors": 0,
     "skipped": 0
   },
   "returncode": 0,
-  "seconds": 26.516,
+  "seconds": 26.938,
   "real_tmux": true,
   "real_pty": true,
   "native_agents": "synthetic fixtures only",

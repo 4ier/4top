@@ -311,3 +311,32 @@ def test_launch_binding_does_not_claim_current_native_context(tmux_lab):
     row = next(row for row in lab.manager.snapshot().rows if row.run_id == run["run_id"])
     assert row.binding == "explicit-launch"
     assert lab.manager.store.get(run["run_id"])["current_history_key"] is None
+
+
+def test_closed_terminal_without_exit_evidence_blocks_resume(tmux_lab, monkeypatch):
+    lab = tmux_lab
+    run = lab.manager.new("claude", str(lab.path))
+    lab.report(run)
+    key = lab.manager.history(force=True).records[0].key
+    snapshot = lab.manager.tmux.snapshot()
+    pending = replace(snapshot, panes=tuple(
+        replace(pane, dead=True, exit_code=None, exit_signal=None)
+        if pane.run_id == run["run_id"] else pane for pane in snapshot.panes))
+    monkeypatch.setattr(lab.manager.tmux, "snapshot", lambda: pending)
+    assert lab.manager.tmux.observe(run)[0] == "UNKNOWN"
+    with pytest.raises(Unavailable, match="cannot be verified"):
+        lab.manager.resume(key)
+
+
+def test_signalled_exit_retains_signal_evidence(tmux_lab):
+    import os
+    import signal
+
+    lab = tmux_lab
+    run = lab.manager.new("pi", str(lab.path))
+    lab.report(run)
+    assert process_identity(run["pid"]) == run["process_identity"]
+    os.kill(run["pid"], signal.SIGKILL)  # Only this isolated test's exact process.
+    _, pane, _ = eventually(lambda: (value := lab.manager.tmux.observe(run))[0] == "EXIT" and value)
+    assert pane.exit_code is None
+    assert pane.exit_signal.upper() in {"KILL", "SIGKILL"}

@@ -34,7 +34,7 @@ before submitting another task. 4top adds no permission-bypass flags itself.
 - Root package target: Python >=3.11, macOS/Linux. Core session-ls: Python >=3.9.
 - Runtime target: tmux >=3.3. Not every minimum version is certified.
 - **Developer Mac:** macOS 27.0 arm64, Python 3.13.13, tmux 3.6b, Textual 8.2.8.
-  **109 automated tests passed, zero failures/errors/skips**, plus the separate
+  **117 automated tests passed, zero failures/errors/skips**, plus the separate
   real native checks above and a clean virtual-environment wheel installation.
 - **Earlier 0.1.0a1 container run:** Linux x86_64, Python 3.13.5, tmux 3.4,
   Textual 8.2.8; 96 automated tests. This is historical evidence, not a Linux

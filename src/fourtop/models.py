@@ -33,6 +33,7 @@ class Pane:
     host_id: str
     agent: str
     ready: bool
+    exit_signal: str | None = None
 
 
 @dataclass(frozen=True)
