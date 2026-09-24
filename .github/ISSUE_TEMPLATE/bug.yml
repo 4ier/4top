@@ -1,0 +1,21 @@
+name: Bug report
+description: A reproducible 4top problem without private transcript data
+title: '[bug] '
+body:
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Commit/version, OS, Python, tmux and agent versions. Review diagnostics before posting.
+    validations: {required: true}
+  - type: textarea
+    id: steps
+    attributes:
+      label: Synthetic reproduction
+      description: Exact steps, expected and actual behavior. No secrets or raw production transcripts.
+    validations: {required: true}
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and affected run/operation identifiers
+      description: Redacted errors, safe test fixtures, and whether attach or resume was involved.

@@ -1,13 +1,15 @@
-# Byte-compiled / cache
 __pycache__/
 *.py[cod]
+*.egg-info/
 .pytest_cache/
-
-# Packaging
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
 build/
 dist/
-*.egg-info/
-
-# Virtualenvs
-.venv/
-venv/
+*.log
+*.sock
+.DS_Store
+acceptance-output/
+*.xml

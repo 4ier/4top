@@ -1,0 +1,5 @@
+include LICENSE README.md README.zh-CN.md CHANGELOG.md CONTRIBUTING.md SECURITY.md requirements-dev.lock
+recursive-include docs *.md *.svg *.json
+recursive-include tests *.py
+recursive-include scripts *.py *.sh
+recursive-exclude * __pycache__ *.pyc

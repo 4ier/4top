@@ -11,10 +11,9 @@ Add a new agent by appending one entry to REGISTRY:
 - user-text-extractor(line) -> first real user message text or ''
   ('' = keep scanning; drives the early-exit read)
 """
-import argparse, glob, json, os, re, shutil, signal, subprocess
+import argparse, glob, json, os, re, shutil, signal, subprocess, tempfile
 from datetime import datetime, timezone
 
-signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 HOME = os.path.expanduser("~")
 CACHE = os.path.join(HOME, ".cache", "session_ls_cache.json")
 
@@ -141,10 +140,17 @@ def _load_cache():
 
 def _save_cache(cache):
     os.makedirs(os.path.dirname(CACHE), exist_ok=True)
-    tmp = CACHE + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False)
-    os.replace(tmp, CACHE)
+    fd, tmp = tempfile.mkstemp(prefix=".session-ls-", dir=os.path.dirname(CACHE))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CACHE)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
 
 def parse_all(files):
     cache = _load_cache()
@@ -164,9 +170,12 @@ def parse_all(files):
             with open(f, encoding="utf-8", errors="replace") as fh:
                 head, title = [], ""
                 for _ in range(2000):
-                    line = fh.readline().strip()
-                    if not line:
+                    raw = fh.readline()
+                    if not raw:
                         break
+                    line = raw.strip()
+                    if not line:
+                        continue
                     head.append(line)
                     try:
                         title = user_text(line)
@@ -212,15 +221,10 @@ def main():
     files = collect()
 
     if args.full and args.keyword and files:
-        # ripgrep if available (much faster over GBs), else plain grep.
-        # Only shell out when there are files: rg/grep with no paths would
-        # scan the CWD (rg) or block on stdin (grep).
-        rg = shutil.which("rg")
-        cmd = [rg, "-l", "-i", args.keyword, *[f for _, _, _, f in files]] if rg \
-            else ["grep", "-l", "-i", args.keyword, *[f for _, _, _, f in files]]
-        out = subprocess.run(cmd, capture_output=True, text=True).stdout
-        keep = set(out.splitlines())
-        files = [x for x in files if x[3] in keep]
+        # Literal, decoded matching. No subprocess, option ambiguity, or ARG_MAX limit.
+        from .api import contains_literal_file
+        files = [entry for entry in files
+                 if contains_literal_file(entry[3], [args.keyword.casefold()])]
 
     rows = parse_all(files)
 
@@ -257,4 +261,10 @@ def main():
         print(f"\n{len(rows)} sessions")
 
 if __name__ == "__main__":
+    main()
+
+
+def cli():
+    """Console entry point; signal policy belongs here, never at import time."""
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
     main()

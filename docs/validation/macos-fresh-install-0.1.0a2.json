@@ -1,0 +1,57 @@
+{
+  "fresh_venv": true,
+  "version": "4top 0.1.0a2",
+  "demo_rows": 6,
+  "legacy_empty_home": true,
+  "root_wheel_owns_core": false,
+  "installed": [
+    {
+      "name": "4top",
+      "version": "0.1.0a2"
+    },
+    {
+      "name": "linkify-it-py",
+      "version": "2.2.0"
+    },
+    {
+      "name": "markdown-it-py",
+      "version": "4.2.0"
+    },
+    {
+      "name": "mdit-py-plugins",
+      "version": "0.6.1"
+    },
+    {
+      "name": "mdurl",
+      "version": "0.1.2"
+    },
+    {
+      "name": "pip",
+      "version": "26.0.1"
+    },
+    {
+      "name": "platformdirs",
+      "version": "4.11.12"
+    },
+    {
+      "name": "Pygments",
+      "version": "2.21.0"
+    },
+    {
+      "name": "rich",
+      "version": "15.0.0"
+    },
+    {
+      "name": "session-ls",
+      "version": "0.2.0"
+    },
+    {
+      "name": "textual",
+      "version": "8.2.8"
+    },
+    {
+      "name": "typing_extensions",
+      "version": "4.16.0"
+    }
+  ]
+}

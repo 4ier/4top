@@ -1,38 +1,54 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "session-ls"
-version = "0.1.0"
-description = "List and search session history across coding agents (pi, codex, claude, cursor)"
+name = "4top"
+version = "0.1.0a2"
+description = "Your coding agents, one terminal. Attach to live processes and find native history."
 readme = "README.md"
-requires-python = ">=3.9"
-license = { file = "LICENSE" }
-keywords = ["agent", "sessions", "search", "pi", "codex", "claude", "cursor"]
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "4ier"}]
+dependencies = ["session-ls>=0.2.0,<0.3", "textual>=8.2.8,<9"]
+keywords = ["tmux", "coding-agents", "terminal", "claude", "codex", "pi"]
 classifiers = [
-    "Environment :: Console",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Operating System :: MacOS",
-    "Operating System :: POSIX :: Linux",
-    "Programming Language :: Python :: 3",
-    "Topic :: Utilities",
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console :: Curses",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
 ]
 
 [project.urls]
-Repository = "https://github.com/4ier/session-ls"
-Issues = "https://github.com/4ier/session-ls/issues"
+Repository = "https://github.com/4ier/4top"
+Issues = "https://github.com/4ier/4top/issues"
 
 [project.scripts]
-session-ls = "session_ls:main"
+4top = "fourtop.cli:main"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-packages = ["session_ls"]
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-asyncio>=0.23,<2", "pexpect>=4.9,<5", "ruff>=0.16,<0.17", "build>=1,<2"]
 
-[tool.setuptools.data-files]
-"share/man/man1" = ["man/session-ls.1"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "packages/session-ls/tests"]
+pythonpath = ["src", "packages/session-ls/src"]
+asyncio_mode = "auto"
+markers = ["tmux: requires an installed tmux binary", "pty: exercises a real pseudoterminal"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+exclude = ["packages/session-ls/src/session_ls/__init__.py", "packages/session-ls/tests/test_cli.py", "packages/session-ls/tests/test_session_ls.py"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.uv.workspace]
+members = ["packages/session-ls"]
+
+[tool.uv.sources]
+session-ls = {workspace = true}
