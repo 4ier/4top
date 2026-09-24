@@ -36,6 +36,9 @@ jobs:
         run: |
           python -m pip install -r requirements-dev.lock
           python -m pip install --no-build-isolation --no-deps -e packages/session-ls -e .
+      - name: Capture synthetic tmux exit diagnostics
+        if: runner.os == 'Linux'
+        run: python scripts/probe_tmux_exit.py
       - name: Lint and unit/headless tests
         run: |
           python -m ruff check .

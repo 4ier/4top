@@ -339,4 +339,4 @@ def test_signalled_exit_retains_signal_evidence(tmux_lab):
     os.kill(run["pid"], signal.SIGKILL)  # Only this isolated test's exact process.
     _, pane, _ = eventually(lambda: (value := lab.manager.tmux.observe(run))[0] == "EXIT" and value)
     assert pane.exit_code is None
-    assert pane.exit_signal.upper() in {"KILL", "SIGKILL"}
+    assert pane.exit_signal.upper() in {"KILL", "SIGKILL", str(signal.SIGKILL.value)}
