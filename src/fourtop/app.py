@@ -375,7 +375,7 @@ class FourtopApp(App[tuple | None]):
         self.show_selection()
         issues = self._full_issues + self.snapshot_data.issues
         message = self._status_message or (" · ".join(issues[:2]) if issues
-                                           else "Resuming starts a new process; nothing is attached.")
+                                           else "Resuming starts a new process; 4top keeps nothing running.")
         if self._full_running:
             message = "Searching decoded raw records… Esc cancels. The table stays usable."
         elif not rows and not terms:

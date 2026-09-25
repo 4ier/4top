@@ -1,19 +1,17 @@
 {
-  "python": "3.13.5",
-  "os": "Linux",
-  "machine": "x86_64",
-  "tmux": "tmux 3.4",
+  "python": "3.13.13",
+  "os": "Darwin",
+  "machine": "arm64",
   "textual": "8.2.8",
   "counts": {
-    "tests": 96,
+    "tests": 121,
     "failures": 0,
     "errors": 0,
     "skipped": 0
   },
   "returncode": 0,
-  "seconds": 13.483,
-  "real_tmux": true,
-  "real_pty": true,
+  "seconds": 11.86,
+  "real_processes": true,
   "native_agents": "synthetic fixtures only",
   "environment_scope": "this execution host only; no other machine is certified",
   "acceptance_scope": "automated runtime/UI safety; not native CLI compatibility certification"

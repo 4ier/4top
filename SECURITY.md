@@ -10,6 +10,6 @@ vulnerability reporting **when it has been enabled for this repository**. Otherw
 open an issue requesting a private contact channel without secret values or exploit
 details. A private reporting endpoint has not been assumed to exist.
 
-Include the exact 4top commit, OS/tmux/Python versions, a synthetic reproduction,
+Include the exact 4top commit, OS/Python versions, a synthetic reproduction,
 the affected boundary and expected versus observed behavior. Native agent vendor
 vulnerabilities should also be reported to the relevant vendor.

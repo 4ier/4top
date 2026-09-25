@@ -4,10 +4,12 @@ The current package is an **alpha**. A passing automated suite is not the full
 product/native-agent sign-off from the design. This guide makes that distinction
 explicit and reproducible.
 
-For the completed 0.1.0a2 developer Mac run, including native Codex checks, see
-[the Mac acceptance record](macos-0.1.0a2.md); it predates the removal of the
-runtime layer, so only its parsing, installation and resume findings still apply.
-The earlier `local-summary.json` records only the original 0.1.0a1 container run.
+For the completed 0.1.0a2 developer Mac run, see
+[the Mac acceptance record](macos-0.1.0a2.md); it was written before the current
+release line, so only its parsing, installation and native-resume findings apply.
+[Current suite summary](macos-suite-dev.json) and
+[fresh-install summary](macos-fresh-install-0.1.0a2.json) are the machine records
+kept in this tree. Raw records for older runs are in git history.
 
 ## Run the isolated suite
 

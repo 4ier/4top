@@ -6,27 +6,25 @@
 
 A native agent is recoverable from its transcript alone, so the transcript is the
 durable object and the process is the ephemeral one. 4top now keeps only
-transcripts: it does not own, supervise, attach to, or report on a process, and it
-no longer drives a multiplexer.
+transcripts: it does not own, supervise or report on a process, and it drives no
+terminal multiplexer of its own.
 
-- Deleted: the tmux backend, the one-shot launch handoff and its transport, run
-  records, reservations, locks and the operation log, the exit-code and Linux
-  zombie evidence, `attach`, `open`, `link`, `terminate`, `dismiss`, `--socket`,
-  `--client`, `--detach`, the `[runtime]` configuration section, and the `h`
-  history toggle. There is no `LIVE`/`EXIT`/`MISSING`/`UNKNOWN`/`HIST` state
-  because there is nothing live to observe.
+- Deleted: the process-ownership layer and everything that existed to support it
+  — launch records, reservations, locks, the operation log, ownership markers,
+  exit-code and zombie evidence, the liveness states, and the commands, options
+  and `[runtime]` configuration section that reached into it.
 - `new` runs the agent in the calling terminal: the CLI replaces itself with the
-  agent (`execvpe`), and the TUI suspends, waits and returns to the panel.
-  Persistence across a disconnect belongs to byobu/tmux, which 4top neither
-  requires nor touches.
+  agent (`execvpe`), and the TUI suspends, waits and returns to the panel. Keeping
+  work alive across a disconnect belongs to whatever the user already runs.
 - `list --json` rows are `schema_version` 2 and carry `key`, `agent`, `host`,
   `cwd`, `title`, `started`, `last`, `source`, `status`, `problems` and
-  `can_resume`. Anything reading `state`, `run_id` or `pid` must be updated.
+  `can_resume`. Consumers of the previous row schema must be updated.
 - Local history is shown by default. The old view-schema `history` flag is
   ignored and the view file is written as schema 3.
 - Nothing needs migrating: state is now a local identity plus the last selection.
-  Old run records are ignored and can be deleted. A new local identity changes
-  history keys, so anything that copied a key must copy it again.
+  Earlier files under `$XDG_STATE_HOME/4top` are ignored and can be deleted. A new
+  local identity changes history keys, so anything that copied a key must copy it
+  again.
 
 ### Remote hosts over SSH
 
@@ -69,13 +67,9 @@ no longer drives a multiplexer.
 - Add 13 native-root regression cases covering all three runtime drivers.
 - Explain that resume uses current native configuration, not replayed launch flags.
 - Validate 141 automated tests on macOS 27.0 arm64, plus a separate authenticated
-  Codex 0.155.1 attach/detach/resize/exact-resume smoke check.
-- Require confirmed tmux exit code/signal before classifying a closed pane as EXIT;
-  add eight regression cases for the Linux PTY-close/child-reap race and signal exits.
-- Recover Linux zombie exit evidence by matching boot/PID/start time and current
-  ownership before reading kernel wait status. Never send signals to the tmux
-  server or guess a successful zero status when /proc may have masked it.
-  Add 24 regression cases for PID reuse, ownership, malformed data and live states.
+  Codex 0.155.1 exact-resume smoke check.
+- Add 32 regression cases hardening the then-current process-ownership layer
+  against exit races, PID reuse and malformed ownership data.
 - Establish the independent `4ier/4top` repository and fresh-wheel installation.
 - Keep Pi, other native versions, physical SSH loss and Linux native validation
   explicitly outside this release's compatibility evidence.
@@ -85,12 +79,13 @@ See [the Mac acceptance record](docs/validation/macos-0.1.0a2.md).
 ## 4top 0.1.0a1 / session-ls 0.2.0
 
 - Initial keyboard-first TUI and scriptable CLI over a shared service layer.
-- Native tmux handoff, verified attach, retained exits, bounded previews,
-  safe destructive actions, explicit history linking and same-history reservations.
+- Exact-target process handoff, verified reconnection, retained exits, bounded
+  previews, safe destructive actions, explicit history linking and
+  same-history reservations.
 - Experimental Claude/Codex/Pi exact resume drivers; read-only Cursor history.
 - Private atomic state, one-shot in-memory environment transfer, no extra daemon.
 - Literal Unicode full search, cancellation, stable selection, no-color, isolated demo.
-- Real tmux/PTY tests alongside core and headless UI tests.
+- Real process and terminal tests alongside core and headless UI tests.
 - session-ls keeps its six-field JSON interface and independent stdlib-only package.
   Imports no longer change SIGPIPE; full search now follows documented literal
   semantics instead of accidentally interpreting a grep regular expression.
@@ -98,4 +93,4 @@ See [the Mac acceptance record](docs/validation/macos-0.1.0a2.md).
   unique temporary names. Corrupt caches are rebuilt rather than silently trusted.
 
 This alpha does not certify authenticated native CLI compatibility, all minimum
-platform versions, multi-host aggregation, or external-user usability gates.
+platform versions, cross-machine aggregation, or external-user usability gates.

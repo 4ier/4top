@@ -6,7 +6,7 @@ body:
     id: environment
     attributes:
       label: Environment
-      description: Commit/version, OS, Python, tmux and agent versions. Review diagnostics before posting.
+      description: Commit/version, OS, Python and agent versions. Review diagnostics before posting.
     validations: {required: true}
   - type: textarea
     id: steps
@@ -18,4 +18,4 @@ body:
     id: evidence
     attributes:
       label: Evidence and affected run/operation identifiers
-      description: Redacted errors, safe test fixtures, and whether attach or resume was involved.
+      description: Redacted errors, safe test fixtures, and whether a launch or a resume was involved.

@@ -10,9 +10,9 @@ daemon, account, model calls, or telemetry.
 
 ![4top synthetic demo — no real user history](docs/demo/demo.svg)
 
-> **0.1.0a2 — alpha.** The current development line no longer owns processes or
-> drives a multiplexer, so the tmux/PTY evidence in earlier records describes the
-> previous model. Codex **0.155.1** passed authenticated exact-resume smoke checks;
+> **0.1.0a2 — alpha.** The current development line owns no process and drives no
+> multiplexer of its own. Codex **0.155.1** passed an authenticated exact-resume
+> smoke check against an earlier build;
 > Claude Code, Pi and other native versions are not certified.
 > [Evidence](docs/validation/macos-0.1.0a2.md). This release is not on PyPI.
 
@@ -52,10 +52,10 @@ row and press **Enter**: 4top asks for confirmation and then runs the native CLI
 in this terminal to resume that exact session. Leave the agent and you are back in
 the panel. **`q` closes only the panel.**
 
-Byobu, tmux, screen, or a bare terminal are equally fine: 4top starts the agent in
-the terminal you are already using and never creates a pane of its own. If you want
-a session to survive closing your laptop, run 4top inside whichever multiplexer you
-already use.
+A plain terminal or any multiplexer you already run is equally fine: 4top starts
+the agent in the terminal it was launched from and never allocates a terminal of
+its own. If you want a session to survive closing your laptop, run 4top inside the
+multiplexer you already use.
 
 | Key | Action |
 | --- | --- |
@@ -87,8 +87,8 @@ queries are reported as issues and never rendered as an empty machine.
 
 Two consequences worth knowing. A resumed agent is a **new** process; two agents in
 one directory still have **no code/worktree isolation**. And `4top new` runs the
-agent in the foreground of the terminal you launched it from: if you are not inside
-byobu or tmux, it ends with that terminal.
+agent in the foreground of the terminal you launched it from: outside a multiplexer
+it ends with that terminal.
 
 ## Remote hosts over SSH
 

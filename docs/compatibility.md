@@ -2,13 +2,13 @@
 
 **Status: 0.1.0a2 alpha.** Implementation, automated tests and real native CLI
 checks are different evidence. The [Mac acceptance record](validation/macos-0.1.0a2.md)
-contains the actual results and their limits; it describes the release **before**
-the runtime layer was removed, so its tmux/attach evidence is historical.
+contains the actual results and their limits. It was written before the current
+release line, so only its parsing, installation and native-resume findings apply.
 
 | Source/driver | History | Launch | Exact native resume | Evidence |
 | --- | --- | --- | --- | --- |
 | Claude Code | JSONL adapter | Experimental; preallocated UUID when advertised | Experimental `--resume UUID` | No authenticated native smoke evidence for this build; synthetic fixtures and a local help/version probe only. |
-| Codex | JSONL + archive adapter | Experimental | Experimental `resume UUID` | Native **0.155.1** passed an authenticated exact-resume smoke against the previous build; that check attached to a pane, which no longer exists. |
+| Codex | JSONL + archive adapter | Experimental | Experimental `resume UUID` | Native **0.155.1** passed an authenticated exact-resume smoke against an earlier build: a new process, the exact history ID, the recorded directory. |
 | Pi | JSONL adapter | Experimental; UUID only when advertised | Experimental `--session PATH` | Native 0.87.0 installed on the acceptance Mac; its help/version probe passes, but no authenticated smoke evidence yet. Excerpts follow file order, not reconstructed active branches. |
 | Cursor | Transcript JSONL | Unsupported | Unsupported | Read-only parser fixtures. Inferred cwd is display-only. |
 
@@ -48,18 +48,18 @@ before submitting another task. 4top adds no permission-bypass flags itself.
 - **Developer Mac:** macOS 27.0 arm64, Python 3.13.13, Textual 8.2.8. The current
   suite covers history parsing, config and host validation, process launch plans,
   the ssh transport (against a fake `ssh`) and the Textual UI.
-- **Earlier 0.1.0a2 record:** 141 automated tests including real tmux/PTY runtime
-  coverage, plus one authenticated Codex attach/resume smoke check. That runtime
-  layer has since been deleted, so the count is not comparable.
-- **Earlier 0.1.0a1 container run:** Linux x86_64, Python 3.13.5, tmux 3.4;
-  96 automated tests. Historical only.
+- **Earlier 0.1.0a2 record:** 141 automated tests on the same Mac, plus one
+  authenticated Codex exact-resume smoke check. The suite has changed shape since,
+  so the count is not comparable.
+- **Earlier 0.1.0a1 container run:** Linux x86_64, Python 3.13.5; 96 automated
+  tests. Historical only.
 - **Hosted CI:** Ubuntu/macOS with Python 3.11/3.13 plus a Python 3.9 core job.
   See the repository's Actions runs for each exact commit; configuration alone
   does not prove a matrix passed.
 
-Developer Ubuntu native-agent testing, physical SSH disconnection, a real
-multi-machine remote run, a full terminal-emulator matrix, disk-full/power-loss
-coverage and independent user usability sign-off remain open. These limitations
+Developer Linux native-agent testing, physical SSH disconnection, a full
+terminal-emulator matrix, disk-full/power-loss coverage, a real two-machine remote
+run and independent user usability sign-off remain open. These limitations
 are compatible with an explicit alpha, not a stable/beta certification.
 
 Known limits: agent formats/flags can drift; archived records may be rejected by

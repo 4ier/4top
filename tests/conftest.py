@@ -57,8 +57,7 @@ def lab(monkeypatch):
         home = root / "home"
         home.mkdir(mode=0o700)
         env = dict(os.environ)
-        for key in ("TMUX", "TMUX_PANE", "CODEX_HOME", "CLAUDE_CONFIG_DIR",
-                    "PI_CODING_AGENT_DIR", "PYTHONPATH"):
+        for key in ("CODEX_HOME", "CLAUDE_CONFIG_DIR", "PI_CODING_AGENT_DIR", "PYTHONPATH"):
             env.pop(key, None)
             monkeypatch.delenv(key, raising=False)
         env.update(HOME=str(home), XDG_STATE_HOME=str(root / "state"),

@@ -11,7 +11,7 @@ directory is a hard error; 4top will not reset identity behind your back.
 | Missing cwd | Select a session whose directory is known, or pass `resume --cwd /new/path`. No directory or symlink is created automatically. |
 | Session cannot resume | Claude and Codex need an exact UUID, and every agent needs a native (not inferred) directory. Cursor transcripts are read-only. |
 | Cannot tell what is running | 4top never claims liveness. Use your own multiplexer, or the agent's native UI. |
-| `4top new` ended with the terminal | The agent runs in the foreground. Start 4top inside byobu/tmux to keep it alive. |
+| `4top new` ended with the terminal | The agent runs in the foreground. Start 4top inside your own terminal multiplexer to keep it alive. |
 | `list` looks stale | `r` refreshes. Metadata rescans on `history_refresh_seconds`; remote hosts refresh on their own interval (default 15s). |
 | Remote host unreachable | `4top --host NAME doctor` shows the ssh exit and stderr. A missing key fails fast because `BatchMode` is always on. |
 | Remote `4top` not found | Non-login ssh shells may not have it on `PATH`; set `command` to an absolute path in `[hosts.NAME]`. |
@@ -32,8 +32,8 @@ interactive terminal; **6** unavailable/unsafe/partial; **130** interrupted UI.
 
 `new` is an explicit launch. `resume` requires confirmation or `--yes`, and on a
 remote host it also requires `--yes` because that process starts on another
-machine. 4top has no `attach`, `link`, `terminate` or `dismiss`: there is no managed
-runtime to attach to or clean up. Prefixes must be unique; row numbers are never
+machine. 4top has no managed runtime, so it has no command that reaches into one.
+Prefixes must be unique; row numbers are never
 accepted.
 
 Full search is literal (AND words, quoted phrases), not regex. Metadata defaults

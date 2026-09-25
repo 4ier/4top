@@ -14,8 +14,8 @@ retains six JSON fields; the typed Python API is versioned independently.
 a **session**, not a process: one row is a `HistoryRecord` plus the host it was
 found on. `fourtop.models.Session` carries `key`, `agent`, `host`, `cwd`, `title`,
 `started`, `last`, `source`, `status`, `problems` and `can_resume`, and nothing
-else. There is no run record, no pane marker and no liveness field, because there
-is nothing to observe: a native agent is resumable from its transcript alone.
+else. There is no launch record, no ownership marker and no liveness field, because
+there is nothing to observe: a native agent is resumable from its transcript alone.
 
 `fourtop.agents.Drivers` turns a capability probe into an exact argv. `plan_new`
 preallocates a session identifier when the CLI advertises one, so a new session
@@ -23,7 +23,7 @@ can be found immediately afterwards. `plan_resume` reopens the approved source
 immediately before planning, refuses an agent/root mismatch, and requires an exact
 UUID for Claude and Codex rather than guessing "the latest".
 
-No module owns, supervises, detaches, kills or re-parents a process. 4top starts
+No module owns, supervises, kills or re-parents a process. 4top starts
 the native CLI in the calling terminal and becomes it (`execvpe` from the CLI) or
 waits for it (TUI, which suspends first). Persistence across a disconnect is the
 user's multiplexer, not 4top's business.
@@ -78,8 +78,7 @@ The Pi preview is file order, explicitly not a reconstruction of its active tree
 
 ## Deliberate alpha limits
 
-No liveness tracking, no attach, no process migration, no semantic status
-inference, no automatic Codex-history binding, no auto-restart, no worktree
+No liveness tracking, no process migration, no semantic status inference, no automatic Codex-history binding, no auto-restart, no worktree
 isolation and no Cursor runtime driver. Remote hosts are view-scoped rather than
 merged, and polling over ssh is the ceiling: push updates would require a daemon
 and are out of scope.
