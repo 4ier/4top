@@ -55,6 +55,13 @@ terminal multiplexer of its own.
   in both parsers, so the first scan after upgrading re-reads every file once.
 - Report why a history file was rejected, not only the exception class, and keep
   OSError text (which contains the private path) out of the message.
+- Print the human table without the terminal UI stack. Display width is computed
+  with `unicodedata`, so `4top list` works where only the standard library is
+  installed. Found by running the CLI on a host that had neither the UI dependency
+  nor a package manager to add it.
+- Stop reporting a remote login banner as a query issue. Only diagnostics prefixed
+  by the remote CLI count, so a healthy host no longer looks broken and no longer
+  exits 6. Found by pointing `--host` at a machine whose ssh shell prints a banner.
 - Correct the acceptance record: Pi 0.87.0 is installed on the acceptance Mac and
   its capability probe passes. No authenticated Pi smoke check was run, and the
   previous "not installed" statement was wrong.

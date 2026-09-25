@@ -53,13 +53,18 @@ before submitting another task. 4top adds no permission-bypass flags itself.
   so the count is not comparable.
 - **Earlier 0.1.0a1 container run:** Linux x86_64, Python 3.13.5; 96 automated
   tests. Historical only.
+- **Remote host (2026-09-26):** Debian 12 x86_64, Python 3.11.2, reached by ssh
+  from macOS. View, preview, full search, terminal handover for `resume` and `new`,
+  the confirmation gate and the row-schema refusal all verified; see
+  [the remote verification record](validation/linux-remote-2026-09-26.md). No real
+  agent CLI was installed there.
 - **Hosted CI:** Ubuntu/macOS with Python 3.11/3.13 plus a Python 3.9 core job.
   See the repository's Actions runs for each exact commit; configuration alone
   does not prove a matrix passed.
 
-Developer Linux native-agent testing, physical SSH disconnection, a full
-terminal-emulator matrix, disk-full/power-loss coverage, a real two-machine remote
-run and independent user usability sign-off remain open. These limitations
+Developer Linux native-agent testing with authenticated agents, physical SSH
+disconnection, a full terminal-emulator matrix, disk-full/power-loss coverage and
+independent user usability sign-off remain open. These limitations
 are compatible with an explicit alpha, not a stable/beta certification.
 
 Known limits: agent formats/flags can drift; archived records may be rejected by

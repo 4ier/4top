@@ -178,3 +178,15 @@ async def test_remote_scope_panel_shows_remote_rows(remote):
         assert app.query_one(DataTable).get_cell("h_abc", "agent").plain == "pi"
         await pilot.press("q")
     manager.close()
+
+
+def test_a_login_banner_is_not_an_issue(remote, tmp_path):
+    # A remote host may print a MOTD before our command runs. That describes the
+    # host, not the query, and must not make a healthy machine look broken.
+    load, rows = remote
+    config, host = load()
+    from fourtop.hosts import _issues
+    banner = "Welcome to the server.\n4top: claude: x.jsonl: ValueError (bad line)\n"
+    assert _issues(host, banner, 0) == ["venus: claude: x.jsonl: ValueError (bad line)"]
+    assert _issues(host, "Welcome to the server.\n", 0) == []
+    assert _issues(host, "Welcome to the server.\n", 6) == ["venus: the remote reported a partial result"]

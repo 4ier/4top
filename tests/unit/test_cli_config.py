@@ -1,4 +1,7 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -7,6 +10,8 @@ from fourtop.cli import main, parser
 from fourtop.config import Config
 from fourtop.errors import FourtopError
 from fourtop.services import unique
+
+SRC = Path(__file__).resolve().parents[2] / "src"
 
 
 @pytest.mark.parametrize("agent,args", [
@@ -130,3 +135,14 @@ def test_issue_text_makes_the_command_exit_six(capsys):
 
     assert _display(Snapshot([], ["venus: ssh exit 255"], scope="venus")) == 6
     assert "ssh exit 255" in capsys.readouterr().err
+
+
+def test_human_table_needs_no_ui_stack(lab):
+    # The non-interactive interface must print a table where only the standard
+    # library is installed, so it may not reach for the terminal UI stack.
+    code = ("import sys; sys.modules['rich'] = None; sys.modules['textual'] = None;"
+            f"from fourtop.cli import main; raise SystemExit(main(['--config', r'{lab.config_file}', 'list']))")
+    result = subprocess.run([sys.executable, "-c", code], env={**lab.env, "PYTHONPATH": str(SRC)},
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stderr
+    assert "AGENT" in result.stdout and "UPDATED" in result.stdout

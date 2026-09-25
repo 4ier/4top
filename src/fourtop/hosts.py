@@ -79,16 +79,31 @@ def parse_rows(host: Host, stdout: str) -> list[Session]:
     return rows
 
 
-def _issues(host: Host, stderr: str) -> list[str]:
-    return [f"{host.name}: {clean_text(line).strip()}"
-            for line in stderr.splitlines() if line.strip()]
+DIAGNOSTIC_PREFIX = "4top: "
+
+
+def _issues(host: Host, stderr: str, code: int) -> list[str]:
+    """Only the remote CLI's own diagnostics are issues.
+
+    A login banner, a shell warning or an ssh notice on stderr describes the host,
+    not the query, so treating every line as a problem would report a healthy
+    machine as failing.
+    """
+    issues = []
+    for line in stderr.splitlines():
+        text = clean_text(line).strip()
+        if text.startswith(DIAGNOSTIC_PREFIX):
+            issues.append(f"{host.name}: {text[len(DIAGNOSTIC_PREFIX):]}")
+    if code == 6 and not issues:
+        issues.append(f"{host.name}: the remote reported a partial result")
+    return issues
 
 
 def _collect(config: Config, host: Host, args: list[str]) -> tuple[list[Session], list[str]]:
     code, out, err = run_remote(config, host, args)
     if code not in (0, 6):
         raise ssh_failure(host, code, err)
-    return parse_rows(host, out), _issues(host, err)
+    return parse_rows(host, out), _issues(host, err, code)
 
 
 def remote_snapshot(config: Config, host: Host) -> Snapshot:
@@ -120,5 +135,5 @@ def remote_doctor(config: Config, host: Host) -> dict:
     if not isinstance(report, dict):
         raise Unavailable(f"{host.name}: doctor returned {type(report).__name__}")
     report["host"] = host.name
-    report["issues"] = list(report.get("issues", [])) + _issues(host, err)
+    report["issues"] = list(report.get("issues", [])) + _issues(host, err, code)
     return report

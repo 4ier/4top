@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+import unicodedata
 
 from session_ls.api import clean_text
 from session_ls.storage import StorageError
@@ -78,18 +79,31 @@ def confirm(message: str, yes: bool) -> None:
         raise Conflict("Cancelled; no change made")
 
 
+def _cell_width(value: str) -> int:
+    """Display width: wide CJK characters count twice, combining marks not at all.
+
+    This stays in the standard library on purpose. The non-interactive interface
+    must not need a terminal UI stack to print a table.
+    """
+    width = 0
+    for character in value:
+        if unicodedata.combining(character):
+            continue
+        width += 2 if unicodedata.east_asian_width(character) in ("W", "F") else 1
+    return width
+
+
 def _clip(value: str, width: int) -> str:
-    """Pad or truncate to a display width, counting wide (CJK) characters as two."""
-    from rich.cells import cell_len
+    """Pad or truncate to a display width, counting wide characters as two."""
     value = clean_text(value)
-    if cell_len(value) > width:
+    if _cell_width(value) > width:
         kept = ""
         for character in value:
-            if cell_len(kept + character) > width - 1:
+            if _cell_width(kept + character) > width - 1:
                 break
             kept += character
         value = kept + "…"
-    return value + " " * max(0, width - cell_len(value))
+    return value + " " * max(0, width - _cell_width(value))
 
 
 COLUMNS = (("AGENT", 7), ("UPDATED", 8), ("PROJECT", 26), ("TITLE", 34), ("KEY", 35))
