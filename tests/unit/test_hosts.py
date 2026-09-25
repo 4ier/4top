@@ -157,3 +157,23 @@ def test_control_path_lives_in_private_state(lab):
     assert control.endswith("/%C")
     assert str(lab.config.state_dir) in control
     assert stat.S_IMODE((lab.config.state_dir / "ssh").stat().st_mode) == 0o700
+
+
+@pytest.mark.asyncio
+async def test_remote_scope_panel_shows_remote_rows(remote):
+    from fourtop.app import FourtopApp
+    from fourtop.services import Manager
+    from textual.widgets import DataTable, Static
+
+    load, rows = remote
+    config, host = load()
+    manager = Manager(config, host)
+    app = FourtopApp(manager)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(3)
+        assert app.manager.remote
+        assert [row.host for row in app.shown] == ["venus"]
+        assert "venus" in str(app.query_one("#counts", Static).render())
+        assert app.query_one(DataTable).get_cell("h_abc", "agent").plain == "pi"
+        await pilot.press("q")
+    manager.close()
