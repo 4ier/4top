@@ -14,6 +14,7 @@ runtime control; 4top will not reset identity behind your back.
 | History already active | Use attach/open. Do not request another resume. Check all registered sockets. |
 | UNKNOWN / stale | Inspect the exact native tmux pane/server and process. A failed query is not evidence the agent exited. |
 | tmux socket changed | Supply `--socket /absolute/path` or run in the intended tmux environment. No default traversal of arbitrary sockets. |
+| History rows are not listed | The table always shows managed runs; `h` toggles local history in and out. The counts line reports the real total either way. |
 | Shared calling session | Use `attach RUN --client /dev/pts/N` (Linux) or the exact macOS TTY from native `tmux list-clients`. |
 | Different socket inside tmux | Return to an outer terminal before attaching; nesting is refused. |
 | Immediate native failure | The exited pane is retained for preview. No automatic retry. |

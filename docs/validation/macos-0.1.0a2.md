@@ -7,9 +7,10 @@ acceptance record, not a stable release or a claim that every design gate passed
 ## Environment
 
 macOS 27.0 arm64; Python 3.13.13; tmux 3.6b; Textual 8.2.8.
-Native installation: Codex **0.155.1**.
-The existing authenticated CLI installation was used; it was not upgraded.
-Pi was not installed on this host.
+Native installation: Codex **0.155.1**. Pi **0.87.0** is also installed on this
+host (via `~/.local/share/pi-node`), but no authenticated native Pi smoke check
+was performed for this acceptance; only its help/version capability probe.
+The existing authenticated CLI installations were used; they were not upgraded.
 
 ## Automated and installation evidence
 

@@ -8,7 +8,7 @@ contains the actual results and their limits.
 | --- | --- | --- | --- | --- |
 | Claude Code | JSONL adapter | Experimental; preallocated UUID when advertised | Experimental `--resume UUID` | No authenticated native smoke evidence in this release; synthetic fixtures and help-probe mechanism only. |
 | Codex | JSONL + archive adapter | Experimental; new runs unlinked | Experimental `resume UUID` | Native **0.155.1**, same Mac: same smoke checks passed. Exact ID obtained from the native status screen before explicit linking; no cwd/time guess. |
-| Pi | JSONL adapter | Experimental; UUID only when advertised | Experimental `--session PATH` | Synthetic fixtures + help-probe mechanism + tmux/PTY harness. Native CLI unavailable on this Mac; not certified. Excerpts follow file order, not reconstructed active branches. |
+| Pi | JSONL adapter | Experimental; UUID only when advertised | Experimental `--session PATH` | Native CLI 0.87.0 installed on the acceptance Mac and its help/version capability probe passes, but no authenticated smoke evidence yet; not certified. Excerpts follow file order, not reconstructed active branches. |
 | Cursor | Transcript JSONL | Unsupported | Unsupported | Read-only parser fixtures. Inferred cwd is display-only. |
 
 A smoke check for one installed version is not a compatibility promise for all

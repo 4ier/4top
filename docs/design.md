@@ -87,7 +87,9 @@ The Pi preview is file order, explicitly not a reconstruction of its active tree
 
 No multi-host aggregation, process migration, semantic status inference,
 automatic Codex-history binding, auto-restart, worktree isolation or Cursor runtime
-driver. No compatibility certification without real native-version smoke tests.
+driver. Remote hosts are proposed separately in
+[remote-design.md](remote-design.md), which also proposes deleting the runtime
+layer described above. No compatibility certification without real native-version smoke tests.
 State schema 1 is the first implementation; unknown future schemas are refused,
 not guessed or destructively migrated. Unrecorded orphan markers are reported for
 native tmux inspection rather than assigned fabricated directories or IDs.
