@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- A large history no longer costs a full re-render on every refresh. Rows whose
+  inputs are unchanged keep their rendered cells, so a 2.7k-row store went from
+  about 50 ms to about 1 ms per refresh tick. The `age` cell still repaints for
+  managed runs, and any change to a row, the filters or the column layout still
+  rebuilds exactly what changed.
+- Recognize Claude 2.1.x metadata-only session files. Claude prepends records such
+  as `last-prompt`, `mode`, `attachment` and `cost-state`, and a session that was
+  opened, renamed and quit never writes a user or assistant message; those files
+  were reported as `ValueError` instead of being listed. Identity now comes from
+  the `sessionId` these records carry, and the native `ai-title`/`agent-name` is
+  used as the title only when the session has no user text. `PARSER_VERSION` is 2
+  in both parsers, so the first scan after upgrading re-reads every file once.
+- Report why a history file was rejected, not only the exception class, and keep
+  OSError text (which contains the private path) out of the message.
+- Show local history by default; `h` now toggles between all rows and
+  managed runs only. A stored `history: false` from the old schema 1 was written
+  by the previous default rather than by the user, so it is ignored instead of
+  hiding history after an upgrade. The view file is written as schema 2.
+- Correct the acceptance record: Pi 0.87.0 is installed on the acceptance Mac and
+  its capability probe passes. No authenticated Pi smoke check was run, and the
+  previous "not installed" statement was wrong.
+
 ## 4top 0.1.0a2 — 2026-09-24
 
 - Preserve absent native store environment overrides. In particular, launching

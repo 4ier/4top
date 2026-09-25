@@ -229,3 +229,74 @@ def test_cancellation_during_last_file_is_reported(tmp_path, monkeypatch):
         return False, False
     monkeypatch.setattr(api, "_search_stream", cancelled)
     assert search_full(rows, "anything", stop).cancelled
+
+
+CLAUDE_NATIVE = "11112222-3333-4444-5555-666677778888"
+
+
+def make_claude(tmp_path, records):
+    root = tmp_path / "claude"
+    file = root / "projects/-tmp-project" / f"{CLAUDE_NATIVE}.jsonl"
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text("\n".join(json.dumps(value) for value in records) + "\n")
+    return Root("claude", str(root)), file
+
+
+def test_claude_metadata_only_session_is_recognized(tmp_path):
+    # Claude 2.1.x prepends metadata records; a session that was opened and quit
+    # never writes a user/assistant message. It must still list, not error out.
+    root, file = make_claude(tmp_path, [
+        {"type": "last-prompt", "leafUuid": "c450dde6", "sessionId": CLAUDE_NATIVE},
+        {"type": "mode", "mode": "normal", "sessionId": CLAUDE_NATIVE},
+        {"type": "attachment", "cwd": str(tmp_path), "timestamp": "2026-09-23T03:25:31.930Z",
+         "sessionId": CLAUDE_NATIVE},
+    ])
+    record, _ = read_metadata(root, str(file))
+    assert record.native_id == CLAUDE_NATIVE
+    assert record.cwd == str(tmp_path)
+    assert record.started == "2026-09-23T03:25:31.930000+00:00"
+    assert record.status == "partial"  # no user text, but a real session
+
+
+def test_claude_native_title_is_the_fallback(tmp_path):
+    root, file = make_claude(tmp_path, [
+        {"type": "ai-title", "aiTitle": "review sandbox changes", "sessionId": CLAUDE_NATIVE},
+        {"type": "agent-name", "agentName": "reviewer", "sessionId": CLAUDE_NATIVE},
+    ])
+    record, _ = read_metadata(root, str(file))
+    assert record.title == "review sandbox changes"
+
+
+def test_claude_user_text_outranks_native_title(tmp_path):
+    root, file = make_claude(tmp_path, [
+        {"type": "ai-title", "aiTitle": "generated title", "sessionId": CLAUDE_NATIVE},
+        {"type": "user", "cwd": str(tmp_path), "timestamp": "2026-09-24T00:00:00Z",
+         "sessionId": CLAUDE_NATIVE, "message": {"role": "user", "content": "my own words"}},
+    ])
+    record, _ = read_metadata(root, str(file))
+    assert record.title == "my own words"
+
+
+def test_unrecognized_format_still_reports_the_reason(tmp_path):
+    root, file = make_claude(tmp_path, [{"type": "something-else", "payload": 1}])
+    with pytest.raises(ValueError, match="Unrecognized history format"):
+        read_metadata(root, str(file))
+
+
+def test_scan_reports_no_issue_for_metadata_only_claude(tmp_path):
+    root, file = make_claude(tmp_path, [
+        {"type": "last-prompt", "leafUuid": "c450dde6", "sessionId": CLAUDE_NATIVE},
+        {"type": "attachment", "cwd": str(tmp_path), "sessionId": CLAUDE_NATIVE},
+    ])
+    result = HistoryIndex([root], tmp_path / "cache/data.json", "host").scan()
+    assert [record.native_id for record in result.records] == [CLAUDE_NATIVE]
+    assert result.issues == []
+
+
+def test_scan_issue_names_the_reason_not_only_the_exception_type(tmp_path):
+    root, file = make_claude(tmp_path, [{"type": "something-else", "payload": 1}])
+    result = HistoryIndex([root], tmp_path / "cache/data.json", "host").scan()
+    assert result.records == []
+    assert result.issues and "ValueError" in result.issues[0]
+    assert "Unrecognized history format" in result.issues[0]
+    assert str(tmp_path) not in result.issues[0]  # never leak the private path

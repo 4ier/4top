@@ -22,7 +22,7 @@ from . import _claude_user, _codex_user, _cursor_user, _injected, _pi_user
 from .storage import atomic_json, file_lock, read_json
 
 API_VERSION = 1
-PARSER_VERSION = 1
+PARSER_VERSION = 2
 PATTERNS = {
     "claude": ("projects/*/*.jsonl",),
     "codex": ("sessions/*/*/*/rollout-*.jsonl", "archived_sessions/rollout-*.jsonl"),
@@ -176,7 +176,7 @@ def _date(value: Optional[str], fallback: str) -> str:
 
 def read_metadata(root: Root, file: str, host_id: str = "local", max_bytes: int = 2**21,
                   max_lines: int = 2000) -> tuple[HistoryRecord, list]:
-    native_id = cwd = started = title = None
+    native_id = cwd = started = title = native_title = None
     problems = []
     saw_metadata = False
     used = 0
@@ -214,11 +214,19 @@ def read_metadata(root: Root, file: str, host_id: str = "local", max_bytes: int 
                     cwd = cwd or _text_field(payload.get("cwd"))
                     started = started or _text_field(payload.get("timestamp") or data.get("timestamp"))
             elif root.agent == "claude":
-                if data.get("type") in ("user", "assistant", "queue-operation", "summary"):
+                # Claude 2.1.x writes a metadata prelude (last-prompt, mode,
+                # permission-mode, attachment, file-history-snapshot, cost-state,
+                # ai-title) and may never write a user/assistant message, for
+                # example a session that was opened, renamed and quit. Every such
+                # record still carries the sessionId, so identity comes from it
+                # rather than from a message type that may never appear.
+                if _text_field(data.get("sessionId")) or data.get("type") in ("user", "assistant", "queue-operation", "summary"):
                     saw_metadata = True
                     native_id = native_id or _text_field(data.get("sessionId"))
                     cwd = cwd or _text_field(data.get("cwd"))
                     started = started or _text_field(data.get("timestamp"))
+                if native_title is None and data.get("type") in ("ai-title", "agent-name"):
+                    native_title = _text_field(data.get("aiTitle") or data.get("agentName"))
             elif root.agent == "cursor" and data.get("role") in ("user", "assistant"):
                 saw_metadata = True
             if not title:
@@ -251,6 +259,9 @@ def read_metadata(root: Root, file: str, host_id: str = "local", max_bytes: int 
         problems.append("Invalid native identifier")
     if not native_id:
         problems.append("Native identifier unavailable")
+    # A real user message outranks the native session title, which is only used
+    # when the session has no user text at all.
+    title = title or native_title
     if not title:
         problems.append("No user title within metadata budget")
     last = datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat()
@@ -379,7 +390,10 @@ class HistoryIndex:
                             if previous is None or record.last > previous.last:
                                 unique[record.key] = record
                         except (OSError, ValueError, TypeError) as exc:
-                            result.issues.append(f"{root.agent}: {clean_text(path.name)}: {type(exc).__name__}")
+                            # OSError text contains the private path; our own ValueError text does not.
+                            detail = clean_text(str(exc))[:80] if isinstance(exc, (ValueError, TypeError)) else ""
+                            result.issues.append(f"{root.agent}: {clean_text(path.name)}: {type(exc).__name__}"
+                                                 + (f" ({detail})" if detail else ""))
             except OSError as exc:
                 result.issues.append(f"{root.agent} source unavailable: {type(exc).__name__}")
         result.records = sorted(unique.values(), key=lambda row: row.last, reverse=True)

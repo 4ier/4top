@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 HOME = os.path.expanduser("~")
 CACHE = os.path.join(HOME, ".cache", "session_ls_cache.json")
+PARSER_VERSION = 2  # invalidates cached metadata whenever parsing changes
 
 _INJECTED_PREFIXES = ("<recommended_plugins>", "<environment_details>",
                       "<system-reminder>", "# AGENTS.md")
@@ -91,14 +92,37 @@ def _codex(f, head):
     return p.get("cwd"), p.get("timestamp") or h.get("timestamp")
 
 def _claude(f, head):
+    # Claude 2.1.x prepends metadata records and a session may hold no
+    # user/assistant message at all (opened, renamed, quit). Every such record
+    # still carries the sessionId, so identity comes from that, not from a
+    # message type that may never be written.
+    found = None
     for line in head:
         try:
             d = json.loads(line)
         except ValueError:
             continue  # one bad line must not hide the session
-        if d.get("type") == "user":
-            return d.get("cwd"), d.get("timestamp")
-    return None
+        if not (d.get("sessionId") or d.get("type") in ("user", "assistant", "summary")):
+            continue
+        if found is None:
+            found = [None, None]
+        found[0] = found[0] or d.get("cwd")
+        found[1] = found[1] or d.get("timestamp")
+        if found[0] and found[1]:
+            break
+    return tuple(found) if found else None
+
+
+def _native_title(head):
+    """The native session title, used only when the session has no user text."""
+    for line in head:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        if d.get("type") in ("ai-title", "agent-name"):
+            return (d.get("aiTitle") or d.get("agentName") or "").strip()
+    return ""
 
 def _cursor(f, head):
     # ~/.cursor/projects/<cwd-dir>/agent-transcripts/<id>/<id>.jsonl
@@ -134,7 +158,9 @@ def collect():
 def _load_cache():
     try:
         with open(CACHE, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+        # A cache written by different parsing rules must not be trusted.
+        return data if isinstance(data, dict) and data.get("__parser__") == PARSER_VERSION else {}
     except Exception:
         return {}
 
@@ -158,7 +184,7 @@ def parse_all(files):
     for name, parse, user_text, f in files:
         try:
             st = os.stat(f)
-            sig = [st.st_size, st.st_mtime]
+            sig = [st.st_size, st.st_mtime, PARSER_VERSION]
             c = cache.get(f)
             if c and c.get("sig") == sig:  # unchanged: reuse cached metadata
                 new_cache[f] = c
@@ -183,6 +209,8 @@ def parse_all(files):
                         title = ""  # one malformed line must not hide the session
                     if title:
                         break
+                if not title:
+                    title = _native_title(head)
         except Exception:
             continue
         try:
@@ -199,7 +227,7 @@ def parse_all(files):
         dirty = True
         rows.append(row)
     if dirty:
-        _save_cache(new_cache)
+        _save_cache({"__parser__": PARSER_VERSION, **new_cache})
     return rows
 
 def main():
