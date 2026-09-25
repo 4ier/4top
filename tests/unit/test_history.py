@@ -300,3 +300,38 @@ def test_scan_issue_names_the_reason_not_only_the_exception_type(tmp_path):
     assert result.issues and "ValueError" in result.issues[0]
     assert "Unrecognized history format" in result.issues[0]
     assert str(tmp_path) not in result.issues[0]  # never leak the private path
+
+
+def test_a_file_matching_the_pattern_is_skipped_silently(tmp_path):
+    # Real stores contain marker files next to project directories. Matching one is
+    # not a degraded source, so it must not be reported on every scan.
+    root, file = make_pi(tmp_path)
+    (file.parent.parent.parent / "sessions" / "not-a-project").write_text("marker\n")
+    result = HistoryIndex([Root("pi", str(root.path))], tmp_path / "cache/data.json", "host").scan()
+    assert len(result.records) == 1
+    assert result.issues == []
+
+
+def test_a_root_that_is_not_a_directory_is_reported_once(tmp_path):
+    target = tmp_path / "not-a-dir"
+    target.write_text("marker\n")
+    result = HistoryIndex([Root("pi", str(target))], tmp_path / "cache/data.json", "host").scan()
+    assert result.records == []
+    assert result.issues == ["pi: configured root is not a directory"]
+
+
+def test_unreadable_directory_is_still_reported(tmp_path, monkeypatch):
+    root, file = make_pi(tmp_path)
+    (file.parent.parent.parent / "sessions" / "closed").mkdir()
+    real_open = os.open
+    target = str(file.parent.parent.parent / "sessions" / "closed")
+
+    def refusing(path, *args, **kwargs):
+        if str(path) == "closed" or str(path) == target:
+            raise PermissionError(13, "Permission denied")
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", refusing)
+    index = HistoryIndex([Root("pi", str(root.path))], tmp_path / "cache/data.json", "host")
+    result = index.scan()
+    assert any("PermissionError" in issue for issue in result.issues), result.issues

@@ -294,6 +294,11 @@ def source_paths(root: Root, pattern: str, issues: list[str], cancel=None):
                     child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
                                     dir_fd=fd)
                     yield from walk(child, path, remaining[1:])
+                except (FileNotFoundError, NotADirectoryError):
+                    # The pattern matched something that is not, or is no longer, a
+                    # directory: a marker file, a regular file, a raced removal. It was
+                    # never a place sessions live, so this is not a degraded source.
+                    continue
                 except OSError as exc:
                     issues.append(f"{root.agent}: directory {clean_text(name)} unavailable ({type(exc).__name__})")
                 finally:
@@ -305,6 +310,9 @@ def source_paths(root: Root, pattern: str, issues: list[str], cancel=None):
     try:
         fd = os.open(root.path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
     except FileNotFoundError:
+        return
+    except NotADirectoryError:
+        issues.append(f"{root.agent}: configured root is not a directory")
         return
     try:
         yield from walk(fd, Path(root.path), parts)
