@@ -102,7 +102,7 @@ class StateStore:
         # Deliberately do not retain searches, prompts, or preview contents.
         with self.lock("view"):
             atomic_json(self.directory / "view.json", {
-                "schema_version": 1, "selected": selected, "history": history,
+                "schema_version": 2, "selected": selected, "history": history,
             })
 
     def event(self, operation: str, run_id: str | None = None, phase: str = "", code: int = 0) -> str:

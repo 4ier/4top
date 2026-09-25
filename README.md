@@ -39,7 +39,7 @@ Use `.venv/bin/4top` below, or activate the environment:
 
 ```sh
 . .venv/bin/activate
-4top                         # live work first; history is discovered locally
+4top                         # live work and local history, unified
 4top new codex               # launch in this directory, then attach
 4top new claude --detach     # start without taking over this terminal
 ```
@@ -66,7 +66,7 @@ an explicit `--client` through the CLI. Cross-socket nested attach is refused.
 | `↑` / `↓`, `Enter` | Select and open |
 | `/`, `Enter`, `Esc` | Search metadata, return to table, clear/cancel |
 | `Ctrl-F` | Explicit literal full-content search; `Esc` cancels |
-| `h`, `Space`, `i` | Include history, read-only preview, details/actions |
+| `h`, `Space`, `i` | Toggle history, read-only preview, details/actions |
 | `n`, `r`, `?`, `q` | New agent, refresh, help, close panel |
 
 Search supports case-insensitive words and quoted phrases; all terms must match.

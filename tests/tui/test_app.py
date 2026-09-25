@@ -1,4 +1,5 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 from textual.widgets import DataTable, Input, Static
@@ -7,14 +8,24 @@ from fourtop.app import Confirm, Details, FourtopApp, NewRuntime, Preview
 from fourtop.services import DemoManager
 
 
+class _ViewOnlyManager:
+    """Minimal non-demo manager: only the persisted view is read at construction."""
+
+    demo = False
+
+    def __init__(self, view):
+        self.config = SimpleNamespace(color="auto", refresh_seconds=1.0, history_refresh_seconds=5.0)
+        self.store = SimpleNamespace(load_view=lambda: view)
+
+
 @pytest.mark.asyncio
 async def test_demo_keyboard_search_history_and_preview():
     app = FourtopApp(DemoManager())
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        assert len(app.shown) == 4
-        await pilot.press("h")
         assert len(app.shown) == 6
+        await pilot.press("h")
+        assert len(app.shown) == 4
         await pilot.press("slash")
         app.query_one("#query", Input).value = "中文"
         await pilot.pause()
@@ -108,3 +119,57 @@ async def test_q_is_text_while_typing_in_search():
         await pilot.press("slash", "q")
         assert app.query_one("#query", Input).value == "q"
         await pilot.press("escape", "q")
+
+
+def test_legacy_view_does_not_hide_history():
+    # Schema 1 wrote history=false as its own default, so it carries no intent.
+    app = FourtopApp(_ViewOnlyManager({"schema_version": 1, "selected": None, "history": False}))
+    assert app.show_history is True
+
+
+def test_explicit_history_off_is_honored():
+    app = FourtopApp(_ViewOnlyManager({"schema_version": 2, "selected": None, "history": False}))
+    assert app.show_history is False
+
+
+def test_absent_view_keeps_history_on():
+    app = FourtopApp(_ViewOnlyManager({}))
+    assert app.show_history is True
+
+
+@pytest.mark.asyncio
+async def test_unchanged_history_rows_are_not_retexted(monkeypatch):
+    # Re-texting every cell of a large history store on each refresh is what makes
+    # the table feel laggy, so unchanged rows must be skipped entirely.
+    import fourtop.app as app_module
+
+    calls = []
+    original = app_module.plain
+
+    def counting(value, **kwargs):
+        calls.append(str(value))
+        return original(value, **kwargs)
+
+    monkeypatch.setattr(app_module, "plain", counting)
+
+    class HistoryOnlyDemo(DemoManager):
+        def __init__(self):
+            super().__init__()
+            self.rows = [row for row in self.rows if row.state == "HIST"]
+
+    manager = HistoryOnlyDemo()
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        titles = {row.title for row in app.shown}
+        assert len(titles) == 2 and titles <= set(calls)  # rendered once for real
+
+        calls.clear()
+        app.render_rows()
+        app.render_rows()
+        assert not (titles & set(calls))  # unchanged rows are not re-texted
+
+        manager.rows[0] = replace(manager.rows[0], title="changed title")
+        await app.refresh_runtime()  # a real change must still repaint
+        assert "changed title" in calls
+        await pilot.press("q")

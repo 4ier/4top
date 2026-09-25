@@ -253,7 +253,7 @@ class FourtopApp(App[tuple | None]):
             self.no_color = True
         self.snapshot_data = Snapshot([])
         self.shown: list[ViewRow] = []
-        self.show_history = False
+        self.show_history = True
         self.selected_key = None
         self._refreshing = self._history_loading = self._launching = False
         self._columns = []
@@ -268,7 +268,10 @@ class FourtopApp(App[tuple | None]):
         self._status_message = ""
         if not manager.demo:
             view = manager.store.load_view()
-            self.show_history = bool(view.get("history", False))
+            # Schema 1 wrote the old false-by-default before the user could choose,
+            # so it carries no intent; honor a stored value only from schema 2 on.
+            if view.get("schema_version", 1) >= 2:
+                self.show_history = bool(view.get("history", True))
             self.selected_key = view.get("selected")
 
     def compose(self) -> ComposeResult:
@@ -315,6 +318,7 @@ class FourtopApp(App[tuple | None]):
         for key, name, column_width in columns:
             table.add_column(name, width=column_width, key=key)
         self._keys, self._cell_values = [], {}
+        self._row_signatures = {}
 
     async def refresh_history(self):
         if self._history_loading or self._fourtop_closing:
@@ -368,7 +372,16 @@ class FourtopApp(App[tuple | None]):
         if rebuild:
             table.clear()
             self._cell_values.clear()
+            self._row_signatures.clear()
         for row in rows:
+            # Only "age" changes on its own, and only for managed runs, so a row
+            # whose inputs are unchanged needs no cell rebuild. History rows are
+            # the bulk of the table; re-texting all of them every refresh is what
+            # makes a large store feel laggy.
+            signature = None if row.run_id else (row.state, row.stale, row.pid,
+                                                 row.agent, row.cwd, row.title)
+            if not rebuild and signature is not None and self._row_signatures.get(row.key) == signature:
+                continue
             values = {"state": row.state + ("*" if row.stale else ""), "agent": row.agent,
                       "pid": str(row.pid or "—"), "age": age(row.created_at) if row.run_id else "—",
                       "project": Path(row.cwd).name or row.cwd or "unknown", "title": row.title or "(untitled)"}
@@ -387,6 +400,7 @@ class FourtopApp(App[tuple | None]):
                         table.update_cell(row.key, column, cell)
             for (column, _, _), cell in zip(self._columns, cells, strict=True):
                 self._cell_values[row.key, column] = cell
+            self._row_signatures[row.key] = signature
         self._keys = keys
         if keys:
             index = keys.index(self.selected_key) if self.selected_key in keys else min(table.cursor_row, len(keys)-1)
