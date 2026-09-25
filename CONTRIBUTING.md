@@ -14,6 +14,14 @@ python3 -m venv .venv
 .venv/bin/python -m ruff check .
 ```
 
+To make the `4top` command itself run this checkout, install it as an editable
+tool. Otherwise a previously installed copy keeps running older code, which looks
+like a bug in the change you just made.
+
+```sh
+uv tool install --force --editable .   # both packages stay live
+```
+
 No multiplexer is required. `tests/integration` starts real fake agents as real
 processes and asserts their argv, cwd, environment and written session file; the
 remote tests use a fake `ssh` on `PATH` instead of a network. Tests never access the

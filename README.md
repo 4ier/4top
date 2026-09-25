@@ -175,6 +175,7 @@ retained. The only network access is the ssh you configured.
 .venv/bin/python -m pip install -e ./packages/session-ls -e '.[dev]'
 .venv/bin/python -m pytest
 .venv/bin/python -m ruff check .
+uv tool install --force --editable .   # optional: `4top` runs this checkout
 ```
 
 Tests use private temporary HOME/state directories and synthetic agents; the ssh
