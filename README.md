@@ -11,7 +11,7 @@ A keyboard-first terminal dashboard built on **tmux + session-ls**, with no extr
 ![4top synthetic demo — no real user history](docs/demo/demo.svg)
 
 > **0.1.0a2 — alpha.** Real tmux/PTY tests pass on the Mac acceptance host.
-> Claude Code **2.1.280** and Codex **0.155.1** also passed separate authenticated
+> Codex **0.155.1** also passed separate authenticated
 > attach/detach and exact-resume smoke checks there. Drivers remain experimental;
 > Pi and other native versions are not certified. [Evidence](docs/validation/macos-0.1.0a2.md).
 > This release is not on PyPI.

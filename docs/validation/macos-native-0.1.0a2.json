@@ -4,21 +4,9 @@
   "tmux": "3.6b",
   "versions": {
     "4top": "0.1.0a2",
-    "claude": "2.1.280",
     "codex": "0.155.1"
   },
   "native_smoke": {
-    "claude": {
-      "model_round_trip": true,
-      "two_fresh_4top_attach_detach_cycles": true,
-      "same_process_identity": true,
-      "resize": true,
-      "live_duplicate_resume_refused": true,
-      "native_graceful_exit": true,
-      "resume_new_pid_exact_id_root_cwd": true,
-      "native_history_visible_after_resume": true,
-      "second_resume_refused": true
-    },
     "codex": {
       "model_round_trip": true,
       "two_fresh_4top_attach_detach_cycles": true,

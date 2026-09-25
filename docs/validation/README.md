@@ -4,7 +4,7 @@ The current package is an **alpha**. A passing automated suite is not the full
 product/native-agent sign-off from the design. This guide makes that distinction
 explicit and reproducible.
 
-For the completed 0.1.0a2 developer Mac run, including native Claude/Codex
+For the completed 0.1.0a2 developer Mac run, including native Codex
 checks, see [the Mac acceptance record](macos-0.1.0a2.md). The earlier
 `local-summary.json` records only the original 0.1.0a1 container run.
 

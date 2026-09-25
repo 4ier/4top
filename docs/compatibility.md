@@ -6,7 +6,7 @@ contains the actual results and their limits.
 
 | Source/driver | History | Managed launch | Exact native resume | Evidence |
 | --- | --- | --- | --- | --- |
-| Claude Code | JSONL adapter | Experimental; preallocated UUID when advertised | Experimental `--resume UUID` | Native **2.1.280**, macOS 27.0 arm64: authenticated response, two fresh attach/detach cycles, resize, unchanged process identity, graceful exit, new-PID exact resume and duplicate protection passed. |
+| Claude Code | JSONL adapter | Experimental; preallocated UUID when advertised | Experimental `--resume UUID` | No authenticated native smoke evidence in this release; synthetic fixtures and help-probe mechanism only. |
 | Codex | JSONL + archive adapter | Experimental; new runs unlinked | Experimental `resume UUID` | Native **0.155.1**, same Mac: same smoke checks passed. Exact ID obtained from the native status screen before explicit linking; no cwd/time guess. |
 | Pi | JSONL adapter | Experimental; UUID only when advertised | Experimental `--session PATH` | Synthetic fixtures + help-probe mechanism + tmux/PTY harness. Native CLI unavailable on this Mac; not certified. Excerpts follow file order, not reconstructed active branches. |
 | Cursor | Transcript JSONL | Unsupported | Unsupported | Read-only parser fixtures. Inferred cwd is display-only. |

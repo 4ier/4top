@@ -7,8 +7,8 @@
   for an already-authenticated installation. Explicit profiles still take priority.
 - Add 13 native-root regression cases covering all three runtime drivers.
 - Explain that resume uses current native configuration, not replayed launch flags.
-- Validate 141 automated tests on macOS 27.0 arm64, plus separate authenticated
-  Claude Code 2.1.280 and Codex 0.155.1 attach/detach/resize/exact-resume smoke checks.
+- Validate 141 automated tests on macOS 27.0 arm64, plus a separate authenticated
+  Codex 0.155.1 attach/detach/resize/exact-resume smoke check.
 - Require confirmed tmux exit code/signal before classifying a closed pane as EXIT;
   add eight regression cases for the Linux PTY-close/child-reap race and signal exits.
 - Recover Linux zombie exit evidence by matching boot/PID/start time and current

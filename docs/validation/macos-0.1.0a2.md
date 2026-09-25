@@ -1,14 +1,14 @@
 # 0.1.0a2 — developer Mac acceptance
 
 Date: **2026-09-24**. Result: the Mac automated suite, clean-wheel installation
-and the scoped native Claude/Codex smoke checks passed. This is an **alpha**
+and the scoped native Codex smoke check passed. This is an **alpha**
 acceptance record, not a stable release or a claim that every design gate passed.
 
 ## Environment
 
 macOS 27.0 arm64; Python 3.13.13; tmux 3.6b; Textual 8.2.8.
-Native installations: Claude Code **2.1.280**, Codex **0.155.1**.
-The existing authenticated CLI installations were used; they were not upgraded.
+Native installation: Codex **0.155.1**.
+The existing authenticated CLI installation was used; it was not upgraded.
 Pi was not installed on this host.
 
 ## Automated and installation evidence
@@ -48,25 +48,24 @@ Machine-readable records:
 
 ## Separate authenticated native checks
 
-Both Claude and Codex passed these operator-driven checks through 4top's runtime
+Codex passed these operator-driven checks through 4top's runtime
 services and actual 4top CLI attach commands:
 
-| Check | Claude 2.1.280 | Codex 0.155.1 |
-| --- | --- | --- |
-| Native UI, normal workspace trust prompt, one minimal model response | Pass | Pass |
-| Two newly started 4top CLI attach/detach cycles | Pass | Pass |
-| Same process identity throughout those cycles; terminal resize | Pass | Pass |
-| Exact native history identified without a cwd/time guess | Pass | Pass |
-| Live duplicate resume refused | Pass | Pass |
-| Native Ctrl-C exit retained as EXIT | Pass | Pass |
-| Resume creates a new PID with the exact history ID, root and cwd | Pass | Pass |
-| Earlier test response visible in the resumed native UI | Pass | Pass |
-| A second live resume is refused | Pass | Pass |
+| Check | Codex 0.155.1 |
+| --- | --- |
+| Native UI, normal workspace trust prompt, one minimal model response | Pass |
+| Two newly started 4top CLI attach/detach cycles | Pass |
+| Same process identity throughout those cycles; terminal resize | Pass |
+| Exact native history identified without a cwd/time guess | Pass |
+| Live duplicate resume refused | Pass |
+| Native Ctrl-C exit retained as EXIT | Pass |
+| Resume creates a new PID with the exact history ID, root and cwd | Pass |
+| Earlier test response visible in the resumed native UI | Pass |
+| A second live resume is refused | Pass |
 
 The test used a newly created empty project, isolated 4top state/cache/config
-and a private tmux socket. Claude's first launch disabled tools/MCP/hooks; Codex's
-first launch used read-only sandbox mode. Both received a request only to reply
-with a fixed test token. The Codex session ID was read from its own native status
+and a private tmux socket. Codex's first launch used read-only sandbox mode.
+It received a request only to reply with a fixed test token. The Codex session ID was read from its own native status
 screen before explicit linking. No unrelated history was selected for execution.
 
 Only test-owned processes and the private test tmux server were cleaned up.
