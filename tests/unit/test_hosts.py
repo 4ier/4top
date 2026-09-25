@@ -161,9 +161,10 @@ def test_control_path_lives_in_private_state(lab):
 
 @pytest.mark.asyncio
 async def test_remote_scope_panel_shows_remote_rows(remote):
+    from textual.widgets import DataTable, Static
+
     from fourtop.app import FourtopApp
     from fourtop.services import Manager
-    from textual.widgets import DataTable, Static
 
     load, rows = remote
     config, host = load()
