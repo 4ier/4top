@@ -71,7 +71,7 @@ terminal multiplexer of its own.
 - Preserve absent native store environment overrides. In particular, launching
   Claude no longer relocates its default configuration and triggers onboarding
   for an already-authenticated installation. Explicit profiles still take priority.
-- Add 13 native-root regression cases covering all three runtime drivers.
+- Add 13 native-root regression cases covering all three agent drivers.
 - Explain that resume uses current native configuration, not replayed launch flags.
 - Validate 141 automated tests on macOS 27.0 arm64, plus a separate authenticated
   Codex 0.155.1 exact-resume smoke check.
@@ -86,11 +86,11 @@ See [the Mac acceptance record](docs/validation/macos-0.1.0a2.md).
 ## 4top 0.1.0a1 / session-ls 0.2.0
 
 - Initial keyboard-first TUI and scriptable CLI over a shared service layer.
-- Exact-target process handoff, verified reconnection, retained exits, bounded
-  previews, safe destructive actions, explicit history linking and
-  same-history reservations.
+- Exact-target process management, bounded previews, safe destructive actions,
+  explicit history linking and same-history reservations. That layer is not part
+  of the current line; see the unreleased section above.
 - Experimental Claude/Codex/Pi exact resume drivers; read-only Cursor history.
-- Private atomic state, one-shot in-memory environment transfer, no extra daemon.
+- Private atomic state, no extra daemon, no account.
 - Literal Unicode full search, cancellation, stable selection, no-color, isolated demo.
 - Real process and terminal tests alongside core and headless UI tests.
 - session-ls keeps its six-field JSON interface and independent stdlib-only package.
