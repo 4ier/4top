@@ -60,6 +60,7 @@ multiplexer you already use.
 | Key | Action |
 | --- | --- |
 | `↑` / `↓`, `Enter` | Select and resume |
+| `H` | Switch the panel between this machine and a configured host |
 | `/`, `Enter`, `Esc` | Search metadata, return to table, clear/cancel |
 | `Ctrl-F` | Explicit literal full-content search; `Esc` cancels |
 | `Space`, `i` | Read-only preview, details |
@@ -110,8 +111,9 @@ ssh = "me@build-box"                 # any ssh destination, including a tailnet 
 4top --host me@10.0.0.4 doctor     # an unconfigured target works too
 ```
 
-Views stay isolated: the default scope is this machine, and `--host` replaces it
-rather than merging machines into one table. Anything that starts a process runs
+Views stay isolated: the default scope is this machine, and a host replaces it
+rather than merging machines into one table. `H` switches the panel between them
+without leaving it; `--host NAME` starts the panel already scoped. Anything that starts a process runs
 **on that host** through `ssh -t`, so the resumed agent lives where its history
 lives; the remote CLI does the work and the local side only hands over the
 terminal. Connection reuse (`ControlMaster`) keeps refreshes cheap, `BatchMode`

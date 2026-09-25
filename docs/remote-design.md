@@ -50,6 +50,17 @@ ssh = "me@build-box"
 same placement rules as `--config`. `4top --host N doctor` reports the remote's own
 diagnosis plus the transport result, without writing on either side.
 
+## Switching in the panel
+
+`H` lists this machine and every configured host, and selecting one replaces the
+whole view: rows, selection and any running search belong to the previous scope
+and are dropped. A refresh that was in flight for the old scope is discarded
+rather than rendered into the new one. The scope is always named in the counts
+line.
+
+The saved selection is local-only, because a history key from another machine
+means nothing here.
+
 ## Actions
 
 `resume` and `new` with `--host` hand the terminal to `ssh -t`, so the process is

@@ -16,10 +16,12 @@ from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Input, Select, Static
+from textual.widgets import Button, DataTable, Input, OptionList, Select, Static
+from textual.widgets.option_list import Option
 
 from .errors import FourtopError
 from .models import Session, Snapshot, age
+from .services import Manager
 
 
 def plain(value, *, multiline=False) -> Text:
@@ -171,6 +173,43 @@ class Details(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class HostPicker(ModalScreen[str | None]):
+    """Pick which machine the panel is looking at. Local is always first."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, current: str, choices: list[tuple[str, str]]):
+        super().__init__()
+        self.current, self.choices = current, choices
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static("Switch host", classes="dialog-title")
+            with VerticalScroll(classes="dialog-body"):
+                yield OptionList(*[Option(label, id=value) for value, label in self.choices], id="hosts")
+            with Horizontal(classes="buttons"):
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self):
+        options = self.query_one("#hosts", OptionList)
+        options.focus()
+        for index, (value, _) in enumerate(self.choices):
+            if value == self.current:
+                options.highlighted = index
+                break
+
+    @on(OptionList.OptionSelected, "#hosts")
+    def chosen(self, event: OptionList.OptionSelected):
+        self.dismiss(event.option.id)
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed):
+        self.dismiss(None)
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
 class FourtopApp(App[tuple | None]):
     TITLE = "4top"
     ENABLE_COMMAND_PALETTE = False
@@ -180,7 +219,7 @@ class FourtopApp(App[tuple | None]):
         Binding("n", "new", "New"),
         Binding("space", "preview", "Preview"), Binding("i", "details", "Details"),
         Binding("ctrl+f", "full_search", "Full content"), Binding("r", "refresh", "Refresh"),
-        Binding("question_mark", "help", "Help"),
+        Binding("H", "switch_host", "Host"), Binding("question_mark", "help", "Help"),
     ]
     CSS = """
     Screen { background: $background; color: $text; }
@@ -243,7 +282,7 @@ class FourtopApp(App[tuple | None]):
         yield DataTable(id="table", cursor_type="row", show_row_labels=False, zebra_stripes=True)
         yield Static("", id="selection")
         yield Static("", id="status")
-        yield Static("/ search   Enter resume   n new   Space preview   i details   ? help   q quit", id="keys")
+        yield Static("/ search   Enter resume   n new   H host   Space preview   i details   ? help   q quit", id="keys")
 
     async def on_mount(self):
         self._layout_columns()
@@ -281,7 +320,7 @@ class FourtopApp(App[tuple | None]):
         self._derived = {}
 
     async def refresh_history(self):
-        if self._history_loading or self._fourtop_closing:
+        if self._history_loading or self._fourtop_closing or self.manager.remote:
             return
         self._history_loading = True
         try:
@@ -296,17 +335,21 @@ class FourtopApp(App[tuple | None]):
         if self._refreshing or self._fourtop_closing:
             return
         self._refreshing = True
+        manager = self.manager
         try:
-            self.snapshot_data = await asyncio.to_thread(self.manager.snapshot, False)
+            snapshot = await asyncio.to_thread(manager.snapshot, False)
+            if manager is not self.manager or self._fourtop_closing:
+                return  # The host changed while this was in flight; its rows are not ours.
+            self.snapshot_data = snapshot
             self.stale = False
-            if not self._fourtop_closing:
-                self.render_rows()
+            self.render_rows()
         except (FourtopError, OSError, ValueError) as exc:
+            if manager is not self.manager or self._fourtop_closing:
+                return
             # Keep the previous view; a failed source is not an empty machine.
             self.stale = True
             self.set_status("STALE: " + str(exc))
-            if not self._fourtop_closing:
-                self.render_rows()
+            self.render_rows()
         finally:
             self._refreshing = False
 
@@ -447,6 +490,49 @@ class FourtopApp(App[tuple | None]):
             self.run_worker(self.refresh_history())
         self.run_worker(self.refresh_rows())
 
+    def action_switch_host(self):
+        if self.manager.demo:
+            self.set_status("DEMO is a single synthetic view; it has no hosts.")
+            return
+        hosts = getattr(self.manager.config, "hosts", {}) or {}
+        if not hosts:
+            self.set_status("No [hosts.NAME] entries are configured. See docs/remote-design.md.")
+            return
+        choices = [("", "local · this machine")]
+        choices += [(name, f"{name} · {host.ssh}") for name, host in sorted(hosts.items())]
+        current = self.manager.scope if self.manager.remote else ""
+        self.push_screen(HostPicker(current, choices), self._switch_to)
+
+    def _switch_to(self, name):
+        """Replace the whole view with another machine's. Rows, selection and any
+        running search belong to the old scope and are dropped."""
+        if name is None:
+            return
+        config = self.manager.config
+        target = config.resolve_host(name or None)
+        if (target is not None) == self.manager.remote:
+            return  # Already looking at that scope.
+        previous, self.manager = self.manager, Manager(config, target)
+        previous.close()
+        # Let the new scope refresh immediately instead of waiting for the tick that
+        # the previous scope's request would otherwise block.
+        self._refreshing = self._history_loading = False
+        self.snapshot_data = Snapshot([])
+        self.shown = []
+        self.selected_key = None
+        self.stale = False
+        self._status_message = ""
+        self._full_cancel.set()
+        self._full_keys, self._full_issues = None, []
+        query = self.query_one("#query", Input)
+        query.value = ""
+        query.display = False
+        self.query_one("#table", DataTable).focus()
+        self.set_status(f"Switching to {self.manager.scope}…")
+        if not self.manager.remote:
+            self.run_worker(self.refresh_history())
+        self.run_worker(self.refresh_rows())
+
     def action_full_search(self):
         query = self.query_one("#query", Input).value
         if not query.strip():
@@ -583,7 +669,7 @@ class FourtopApp(App[tuple | None]):
         self.push_screen(Confirm("4top keys & safety", "\n".join((
             "↑ / ↓: select   Enter: review native resume   /: search metadata",
             "Ctrl-F: explicit full-content search   Space: read-only preview   i: details",
-            "n: new agent   r: refresh   q / Ctrl-C: close only the panel",
+            "n: new agent   H: switch host   r: refresh   q / Ctrl-C: close only the panel",
             "Esc: close dialog, cancel full search or clear the query",
             "4top tracks no process: Resume always starts a new one from the transcript.",
             "A resumed agent cannot recover memory, shell children or network state.",
@@ -592,7 +678,9 @@ class FourtopApp(App[tuple | None]):
         ))))
 
     def _save_view(self):
-        if not self.manager.demo:
+        # A remote key belongs to another machine's history, so the local view keeps
+        # only the local selection.
+        if not self.manager.demo and not self.manager.remote:
             with contextlib.suppress(OSError, FourtopError):
                 self.manager.store.save_view(self.selected_key)
 

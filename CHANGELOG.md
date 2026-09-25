@@ -40,6 +40,10 @@ terminal multiplexer of its own.
   stays opaque so it is never recomputed on the wrong machine.
 - `resume` and `new` with `--host` hand the terminal to `ssh -t`, so the process
   is created on the machine that owns the history.
+- `H` switches the running panel between this machine and a configured host, so
+  comparing two machines no longer means quitting and relaunching. Rows, selection
+  and search state are dropped with the old scope, an in-flight refresh for the old
+  scope is discarded, and the saved selection stays local.
 
 ### Fixes in this line
 

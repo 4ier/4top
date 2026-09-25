@@ -190,3 +190,78 @@ def test_a_login_banner_is_not_an_issue(remote, tmp_path):
     assert _issues(host, banner, 0) == ["venus: claude: x.jsonl: ValueError (bad line)"]
     assert _issues(host, "Welcome to the server.\n", 0) == []
     assert _issues(host, "Welcome to the server.\n", 6) == ["venus: the remote reported a partial result"]
+
+
+@pytest.mark.asyncio
+async def test_panel_switches_between_local_and_a_configured_host(remote):
+    from textual.widgets import OptionList, Static
+
+    from fourtop.app import FourtopApp, HostPicker
+    from fourtop.services import Manager
+
+    load, _ = remote
+    config, _ = load()
+    app = FourtopApp(Manager(config))
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(.3)
+        assert not app.manager.remote
+        await pilot.press("H")
+        await pilot.pause()
+        assert isinstance(app.screen, HostPicker)
+        options = app.screen.query_one("#hosts", OptionList)
+        assert [option.id for option in options.options] == ["", "venus"]
+
+        options.highlighted = 1
+        await pilot.press("enter")
+        await pilot.pause(1)
+        assert app.manager.remote and app.manager.scope == "venus"
+        assert [row.host for row in app.shown] == ["venus"]
+        assert "venus" in str(app.query_one("#counts", Static).render())
+
+        await pilot.press("H")
+        await pilot.pause()
+        app.screen.query_one("#hosts", OptionList).highlighted = 0
+        await pilot.press("enter")
+        await pilot.pause(1)
+        assert not app.manager.remote
+        assert app.manager.scope == "local"
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_host_picker_explains_an_empty_configuration(lab):
+    from textual.widgets import Static
+
+    from fourtop.app import FourtopApp, HostPicker
+    from fourtop.services import Manager
+
+    app = FourtopApp(Manager(lab.config))
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.3)
+        await pilot.press("H")
+        await pilot.pause()
+        assert not isinstance(app.screen, HostPicker)
+        assert "No [hosts.NAME] entries" in str(app.query_one("#status", Static).render())
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_host_switch_does_not_keep_a_remote_selection(lab):
+    # A remote key belongs to another machine, so it must not become the saved
+    # local selection.
+    from fourtop.app import FourtopApp
+    from fourtop.services import Manager
+
+    saved = []
+    config = lab.config
+    config.hosts = {}
+    manager = Manager(config)
+    manager.store.__dict__["save_view"] = saved.append
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.3)
+        app.selected_key = "h_remote"
+        app.manager.remote = True
+        app.action_quit()
+        await pilot.pause()
+    assert saved == []
