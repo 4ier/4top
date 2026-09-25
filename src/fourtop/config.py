@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import tomllib
 from dataclasses import dataclass, field
@@ -12,6 +13,7 @@ from session_ls.api import Root
 from .errors import FourtopError
 
 ROOT_ENV = {"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR"}
+HOST_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 
 
 def _absolute(value: str) -> Path:
@@ -32,6 +34,42 @@ def _number(section: dict, key: str, default: float, minimum: float, integer=Fal
     return value
 
 
+@dataclass(frozen=True)
+class Host:
+    """A remote machine reached by running the same CLI over SSH."""
+
+    name: str
+    ssh: str
+    command: str = "4top"
+    refresh_seconds: float = 15.0
+    timeout_seconds: float = 10.0
+    ad_hoc: bool = False
+
+
+def _host(name: str, options: dict, ad_hoc: bool = False) -> Host:
+    if not ad_hoc and not HOST_NAME_RE.match(name):
+        raise FourtopError("Host names must be short and start with a letter or digit", 2)
+    if not isinstance(options, dict):
+        raise FourtopError(f"[hosts.{name}] must be a TOML table", 2)
+    permitted = {"ssh", "command", "refresh_seconds", "timeout_seconds"}
+    if set(options) - permitted:
+        raise FourtopError(f"Unknown option in [hosts.{name}]: "
+                           + ", ".join(sorted(set(options) - permitted)), 2)
+    target = options.get("ssh")
+    # A leading dash would be read as an ssh option, and whitespace cannot be an
+    # argv element on the remote. Both are refused rather than quoted and guessed.
+    if (not isinstance(target, str) or not target or "\x00" in target or target.startswith("-")
+            or any(character.isspace() for character in target)):
+        raise FourtopError(f"Invalid hosts.{name}.ssh; expected one ssh destination", 2)
+    command = options.get("command", "4top")
+    if (not isinstance(command, str) or not command or "\x00" in command or command.startswith("-")
+            or any(character.isspace() for character in command)):
+        raise FourtopError(f"Invalid hosts.{name}.command; expected one executable path", 2)
+    return Host(name, target, command,
+                _number(options, "refresh_seconds", 15.0, 1.0),
+                _number(options, "timeout_seconds", 10.0, 0.1), ad_hoc)
+
+
 @dataclass
 class Config:
     state_dir: Path
@@ -39,23 +77,28 @@ class Config:
     roots: list[Root]
     executables: dict[str, str]
     environment: dict[str, str] = field(repr=False)
-    socket: str | None = None
     refresh_seconds: float = 1
     history_refresh_seconds: float = 5
-    startup_seconds: float = 10
-    control_seconds: float = 5
     metadata_max_bytes: int = 2**21
     metadata_max_lines: int = 2000
     preview_max_lines: int = 200
     color: str = "auto"
     config_path: str | None = None
+    hosts: dict[str, Host] = field(default_factory=dict)
 
     def root(self, agent: str) -> Root:
         return next(root for root in self.roots if root.agent == agent)
 
+    def resolve_host(self, target: str | None) -> Host | None:
+        """None means the local machine. An unknown target is used as-is."""
+        if not target:
+            return None
+        if target in self.hosts:
+            return self.hosts[target]
+        return _host(target, {"ssh": target}, ad_hoc=True)
+
     @classmethod
-    def load(cls, path: str | None = None, socket: str | None = None,
-             environment: dict[str, str] | None = None) -> Config:
+    def load(cls, path: str | None = None, environment: dict[str, str] | None = None) -> Config:
         env = dict(os.environ if environment is None else environment)
         home = _absolute(env.get("HOME", str(Path.home())))
         config_home = _absolute(env.get("XDG_CONFIG_HOME", str(home / ".config")))
@@ -77,16 +120,15 @@ class Config:
                 raise FourtopError("Explicit configuration file was not found", 2) from None
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise FourtopError(f"Cannot read configuration: {type(exc).__name__}", 2) from None
-        allowed = {"ui", "runtime", "history", "agents"}
+        allowed = {"ui", "history", "agents", "hosts"}
         if set(data) - allowed:
             raise FourtopError("Unknown configuration section: " + ", ".join(sorted(set(data) - allowed)), 2)
         for key in allowed:
             if not isinstance(data.get(key, {}), dict):
                 raise FourtopError(f"[{key}] must be a TOML table", 2)
-        ui, runtime, history, agents = (data.get(name, {}) for name in ("ui", "runtime", "history", "agents"))
+        ui, history, agents, hosts = (data.get(name, {}) for name in ("ui", "history", "agents", "hosts"))
         for section, values, permitted in (
             ("ui", ui, {"refresh_seconds", "history_refresh_seconds", "color"}),
-            ("runtime", runtime, {"socket", "startup_handshake_seconds", "control_timeout_seconds"}),
             ("history", history, {"metadata_max_bytes", "metadata_max_lines", "preview_max_lines"}),
         ):
             if set(values) - permitted:
@@ -116,14 +158,10 @@ class Config:
         color = ui.get("color", "auto")
         if color not in ("auto", "none"):
             raise FourtopError("ui.color must be auto or none", 2)
-        chosen_socket = socket if socket is not None else runtime.get("socket")
-        if chosen_socket:
-            chosen_socket = str(_absolute(chosen_socket))
-        return cls(state, cache, roots, executables, env, chosen_socket,
+        return cls(state, cache, roots, executables, env,
                    _number(ui, "refresh_seconds", 1.0, 0.1),
                    _number(ui, "history_refresh_seconds", 5.0, 0.1),
-                   _number(runtime, "startup_handshake_seconds", 10.0, 0.1),
-                   _number(runtime, "control_timeout_seconds", 5.0, 0.1),
                    _number(history, "metadata_max_bytes", 2**21, 1, True),
                    _number(history, "metadata_max_lines", 2000, 1, True),
-                   _number(history, "preview_max_lines", 200, 1, True), color, str(config_file))
+                   _number(history, "preview_max_lines", 200, 1, True), color, str(config_file),
+                   {name: _host(name, options) for name, options in hosts.items()})

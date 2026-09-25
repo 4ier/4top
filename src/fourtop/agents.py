@@ -22,6 +22,9 @@ RESERVED = {
            "--no-session", "--print", "-p", "--mode"},
 }
 
+# Capability probes are local `--help` / `--version` calls; they never authenticate.
+PROBE_SECONDS = 5.0
+
 
 @dataclass(frozen=True)
 class Capability:
@@ -75,12 +78,12 @@ class Drivers:
             return self._probes[key]
         try:
             result = subprocess.run([executable, "--help"], capture_output=True, text=True,
-                                    errors="replace", timeout=self.config.control_seconds,
+                                    errors="replace", timeout=PROBE_SECONDS,
                                     env=self.config.environment, cwd="/")
             help_text = result.stdout + result.stderr
             ok = result.returncode == 0
             version_result = subprocess.run([executable, "--version"], capture_output=True, text=True,
-                                            errors="replace", timeout=self.config.control_seconds,
+                                            errors="replace", timeout=PROBE_SECONDS,
                                             env=self.config.environment, cwd="/")
             version = version_result.stdout.strip()[:160] if version_result.returncode == 0 else "unknown"
         except (OSError, subprocess.TimeoutExpired):
@@ -102,7 +105,7 @@ class Drivers:
             raise Missing("Working directory does not exist or is not accessible")
         return str(path.resolve())
 
-    def plan_new(self, agent: str, cwd: str, name: str = "", extra: tuple[str, ...] = ()) -> LaunchPlan:
+    def plan_new(self, agent: str, cwd: str, extra: tuple[str, ...] = ()) -> LaunchPlan:
         executable = self.executable(agent)
         validate_extra(agent, extra)
         cwd = self.cwd(cwd)
@@ -115,7 +118,7 @@ class Drivers:
         args.extend(extra)
         env = dict(self.config.environment)
         key = history_key(self.host_id, agent, root, native_id) if native_id else None
-        return LaunchPlan(agent, executable, tuple(args), cwd, env, root, native_id, key, name)
+        return LaunchPlan(agent, executable, tuple(args), cwd, env, root, native_id, key)
 
     def plan_resume(self, record: HistoryRecord, cwd: str | None = None) -> LaunchPlan:
         if record.agent not in RESERVED:
@@ -144,4 +147,4 @@ class Drivers:
             args = (capability.executable, "--session", record.file)
         env = dict(self.config.environment)
         return LaunchPlan(record.agent, capability.executable, args, cwd, env, record.root,
-                          record.native_id, record.key, "")
+                          record.native_id, record.key)

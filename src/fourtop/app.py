@@ -4,41 +4,27 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import subprocess
 import threading
-from collections import Counter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from rich.text import Text
 from session_ls.api import clean_text, query_terms
 from textual import on
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, DataTable, Input, Select, Static
 
 from .errors import FourtopError
-from .models import Snapshot, ViewRow
+from .models import Session, Snapshot, age
 
 
 def plain(value, *, multiline=False) -> Text:
     return Text(clean_text(str(value), multiline=multiline))
 
-
-def age(value: str) -> str:
-    try:
-        started = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        delta = max(0, int((datetime.now(timezone.utc) - started).total_seconds()))
-    except (ValueError, TypeError):
-        return "—"
-    if delta < 60:
-        return f"{delta}s"
-    if delta < 3600:
-        return f"{delta // 60}m"
-    if delta < 86400:
-        return f"{delta // 3600}h{delta // 60 % 60:02d}m"
-    return f"{delta // 86400}d"
 
 
 class Confirm(ModalScreen[bool]):
@@ -68,12 +54,12 @@ class Confirm(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class NewRuntime(ModalScreen[tuple | None]):
+class NewAgent(ModalScreen[tuple | None]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
     def __init__(self, cwd: str, error="", values=None):
         super().__init__()
-        self.values = values or ("codex", cwd, "")
+        self.values = values or ("codex", cwd)
         self.error = error
 
     def compose(self) -> ComposeResult:
@@ -82,11 +68,11 @@ class NewRuntime(ModalScreen[tuple | None]):
             yield Select([(agent, agent) for agent in ("codex", "claude", "pi")],
                          value=self.values[0], allow_blank=False, id="agent")
             yield Input(value=self.values[1], placeholder="Working directory", id="cwd")
-            yield Input(value=self.values[2], placeholder="Optional name (stored locally)", id="name")
-            yield Static(plain(self.error or "Starts the original CLI with its own permissions and authentication."), id="form-error")
+            yield Static(plain(self.error or "Runs the original CLI in this terminal, with its own "
+                                             "permissions and authentication."), id="form-error")
             with Horizontal(classes="buttons"):
                 yield Button("Cancel", id="cancel")
-                yield Button("Start & attach", id="start", variant="primary")
+                yield Button("Start", id="start", variant="primary")
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed):
@@ -97,28 +83,7 @@ class NewRuntime(ModalScreen[tuple | None]):
             if not cwd:
                 self.query_one("#form-error", Static).update("A working directory is required.")
                 return
-            self.dismiss((str(self.query_one("#agent", Select).value), cwd, self.query_one("#name", Input).value))
-
-    def action_cancel(self):
-        self.dismiss(None)
-
-
-class LinkHistory(ModalScreen[str | None]):
-    BINDINGS = [("escape", "cancel", "Cancel")]
-
-    def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
-            yield Static("Confirm a history association", classes="dialog-title")
-            yield Static("Paste an exact history key from the history view or `4top list --json`. "
-                         "The agent and source profile must match. This does not change native context.")
-            yield Input(placeholder="h_… or exact native ID", id="history-key")
-            with Horizontal(classes="buttons"):
-                yield Button("Cancel", id="cancel")
-                yield Button("Review association", id="link", variant="primary")
-
-    @on(Button.Pressed)
-    def pressed(self, event: Button.Pressed):
-        self.dismiss(self.query_one("#history-key", Input).value if event.button.id == "link" else None)
+            self.dismiss((str(self.query_one("#agent", Select).value), cwd))
 
     def action_cancel(self):
         self.dismiss(None)
@@ -127,7 +92,7 @@ class LinkHistory(ModalScreen[str | None]):
 class Preview(ModalScreen):
     BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close")]
 
-    def __init__(self, manager, row: ViewRow):
+    def __init__(self, manager, row: Session):
         super().__init__()
         self.manager, self.row = manager, row
         self.cursor = 0
@@ -175,31 +140,28 @@ class Preview(ModalScreen):
 class Details(ModalScreen[str | None]):
     BINDINGS = [("escape", "close", "Close")]
 
-    def __init__(self, row: ViewRow, demo=False):
+    def __init__(self, row: Session, demo=False):
         super().__init__()
         self.row, self.demo = row, demo
 
     def compose(self) -> ComposeResult:
         row = self.row
+        lines = [f"Key: {row.key}", f"Agent: {row.agent}", f"Host: {row.host}",
+                 f"Directory: {row.cwd}", f"Title: {row.title}",
+                 f"Started: {row.started}", f"Last written: {row.last}",
+                 f"Status: {row.status}", f"Source: {row.source}"]
+        lines.extend(f"Problem: {problem}" for problem in row.problems)
+        lines.append(row.issue or "")
+        lines.append("4top does not track a running process. Resuming starts a new one; "
+                     "the original memory, shell children and network connections are gone.")
         with Vertical(classes="dialog preview-dialog"):
-            yield Static("Work details", classes="dialog-title")
+            yield Static("Session details", classes="dialog-title")
             with VerticalScroll(classes="dialog-body"):
-                yield Static(plain("\n".join((
-                    f"Key: {row.key}", f"State: {row.state}{' (STALE)' if row.stale else ''}",
-                    f"Agent: {row.agent}", f"Directory: {row.cwd}", f"Title: {row.title}",
-                    f"Run: {row.run_id or '—'}", f"Launch / user association: {row.history_key or 'unlinked'}",
-                    f"Binding: {row.binding}", "Current native context: not continuously observed",
-                    f"PID: {row.pid or '—'} · connected clients: {row.clients}",
-                    f"Observed: {row.observed_at}", f"Source: {row.source}",
-                    row.issue or "", "Multiple clients share tmux's view. No other client is detached.",
-                    "HIST does not prove that an externally launched agent has exited.",
-                )), multiline=True))
+                yield Static(plain("\n".join(lines), multiline=True))
             with Horizontal(classes="buttons"):
                 yield Button("Close", id="close")
-                yield Button("Link", id="link", disabled=self.demo or not row.can_attach)
-                yield Button("Dismiss", id="dismiss", disabled=self.demo or row.state not in ("EXIT", "MISSING"))
-                yield Button("Terminate…", id="terminate", variant="error",
-                             disabled=self.demo or not row.run_id or row.state not in ("LIVE", "EXIT"))
+                yield Button("Resume…", id="resume", variant="primary",
+                             disabled=self.demo or not row.can_resume)
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed):
@@ -215,7 +177,7 @@ class FourtopApp(App[tuple | None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"), Binding("ctrl+c", "quit", "Quit", priority=True),
         Binding("slash", "search", "Search"), Binding("escape", "clear_search", "Clear"),
-        Binding("h", "history", "History"), Binding("n", "new", "New"),
+        Binding("n", "new", "New"),
         Binding("space", "preview", "Preview"), Binding("i", "details", "Details"),
         Binding("ctrl+f", "full_search", "Full content"), Binding("r", "refresh", "Refresh"),
         Binding("question_mark", "help", "Help"),
@@ -252,13 +214,15 @@ class FourtopApp(App[tuple | None]):
             self._filters.append(NoColor())
             self.no_color = True
         self.snapshot_data = Snapshot([])
-        self.shown: list[ViewRow] = []
-        self.show_history = True
+        self.shown: list[Session] = []
         self.selected_key = None
+        self.stale = False
         self._refreshing = self._history_loading = self._launching = False
         self._columns = []
         self._keys = []
         self._cell_values = {}
+        self._row_signatures = {}
+        self._derived = {}
         self._full_keys: set[str] | None = None
         self._full_issues: list[str] = []
         self._full_cancel = threading.Event()
@@ -267,32 +231,28 @@ class FourtopApp(App[tuple | None]):
         self._fourtop_closing = False
         self._status_message = ""
         if not manager.demo:
-            view = manager.store.load_view()
-            # Schema 1 wrote the old false-by-default before the user could choose,
-            # so it carries no intent; honor a stored value only from schema 2 on.
-            if view.get("schema_version", 1) >= 2:
-                self.show_history = bool(view.get("history", True))
-            self.selected_key = view.get("selected")
+            self.selected_key = manager.store.load_view().get("selected")
 
     def compose(self) -> ComposeResult:
         label = "4top  /  Your coding agents, one terminal."
         if self.manager.demo:
             label += "  [DEMO]"
         yield Static(plain(label), id="brand")
-        yield Static("Opening local view…", id="counts")
-        yield Input(placeholder="Search titles, directories, agents or IDs · Ctrl-F: full content · Esc: clear", id="query")
+        yield Static("Opening the view…", id="counts")
+        yield Input(placeholder="Search titles, directories, agents or keys · Ctrl-F: full content · Esc: clear", id="query")
         yield DataTable(id="table", cursor_type="row", show_row_labels=False, zebra_stripes=True)
         yield Static("", id="selection")
         yield Static("", id="status")
-        yield Static("/ search   Enter open   h history   n new   Space preview   i details   ? help   q quit", id="keys")
+        yield Static("/ search   Enter resume   n new   Space preview   i details   ? help   q quit", id="keys")
 
     async def on_mount(self):
         self._layout_columns()
         self.query_one("#table", DataTable).focus()
-        self.set_interval(self.manager.config.refresh_seconds, self.refresh_runtime)
-        self.set_interval(self.manager.config.history_refresh_seconds, self.refresh_history)
-        self.run_worker(self.refresh_history())
-        await self.refresh_runtime()
+        self.set_interval(self.manager.config.refresh_seconds, self.refresh_rows)
+        if not self.manager.remote:
+            self.set_interval(self.manager.config.history_refresh_seconds, self.refresh_history)
+            self.run_worker(self.refresh_history())
+        await self.refresh_rows()
 
     def on_resize(self, event):
         if self.is_mounted:
@@ -302,12 +262,11 @@ class FourtopApp(App[tuple | None]):
     def _layout_columns(self, width=None):
         width = width if width is not None else self.size.width
         if width < 60:
-            columns = [("state", "STATE", 7), ("agent", "AGENT", 7), ("title", "TITLE", max(12, width - 21))]
+            columns = [("agent", "AGENT", 7), ("title", "TITLE", max(12, width - 10))]
         else:
-            columns = [("state", "STATE", 7), ("agent", "AGENT", 7)]
+            columns = [("agent", "AGENT", 7), ("project", "PROJECT", 18 if width >= 80 else 13)]
             if width >= 100:
-                columns.extend([("pid", "PID", 7), ("age", "AGE", 7)])
-            columns.append(("project", "PROJECT", 18 if width >= 80 else 13))
+                columns.append(("age", "UPDATED", 9))
             used = sum(item[2] + 2 for item in columns)
             columns.append(("title", "TITLE", max(12, width - used - 3)))
         if columns == self._columns:
@@ -319,6 +278,7 @@ class FourtopApp(App[tuple | None]):
             table.add_column(name, width=column_width, key=key)
         self._keys, self._cell_values = [], {}
         self._row_signatures = {}
+        self._derived = {}
 
     async def refresh_history(self):
         if self._history_loading or self._fourtop_closing:
@@ -326,27 +286,27 @@ class FourtopApp(App[tuple | None]):
         self._history_loading = True
         try:
             await asyncio.to_thread(self.manager.history)
-            await self.refresh_runtime()
+            await self.refresh_rows()
         except (FourtopError, OSError, ValueError) as exc:
             self.set_status("History unavailable: " + str(exc))
         finally:
             self._history_loading = False
 
-    async def refresh_runtime(self):
+    async def refresh_rows(self):
         if self._refreshing or self._fourtop_closing:
             return
         self._refreshing = True
         try:
             self.snapshot_data = await asyncio.to_thread(self.manager.snapshot, False)
+            self.stale = False
             if not self._fourtop_closing:
                 self.render_rows()
         except (FourtopError, OSError, ValueError) as exc:
-            # Keep the previous view; don't turn a failed source into an empty screen.
-            from dataclasses import replace
-            self.snapshot_data.rows = [replace(row, stale=True, can_attach=False, can_resume=False)
-                                       for row in self.snapshot_data.rows]
+            # Keep the previous view; a failed source is not an empty machine.
+            self.stale = True
             self.set_status("STALE: " + str(exc))
-            self.render_rows()
+            if not self._fourtop_closing:
+                self.render_rows()
         finally:
             self._refreshing = False
 
@@ -356,15 +316,11 @@ class FourtopApp(App[tuple | None]):
         query = self.query_one("#query", Input).value
         terms = query_terms(query, tolerant=True)
         rows = self.snapshot_data.rows
-        has_runtime = any(row.run_id for row in rows)
         if self._full_keys is not None:
             rows = [row for row in rows if row.key in self._full_keys]
         elif terms:
-            rows = [row for row in rows if all(term in "\n".join((
-                row.title, row.cwd, row.agent, row.key, row.run_id or "", row.history_key or ""
-            )).casefold() for term in terms)]
-        elif not self.show_history and has_runtime:
-            rows = [row for row in rows if row.run_id]
+            rows = [row for row in rows if all(term in "\n".join(
+                (row.title, row.cwd, row.agent, row.key)).casefold() for term in terms)]
         self.shown = rows
         keys = [row.key for row in rows]
         table = self.query_one("#table", DataTable)
@@ -373,25 +329,27 @@ class FourtopApp(App[tuple | None]):
             table.clear()
             self._cell_values.clear()
             self._row_signatures.clear()
+            self._derived.clear()
+        # Deriving a label or a project name for every row on every tick dominates the
+        # refresh cost of a large store, so derived values are cached until the row,
+        # or the coarse age bucket, changes.
+        now = datetime.now(timezone.utc)
+        seconds = int(now.timestamp())
+        recent_cutoff = (now - timedelta(hours=1)).isoformat()
         for row in rows:
-            # Only "age" changes on its own, and only for managed runs, so a row
-            # whose inputs are unchanged needs no cell rebuild. History rows are
-            # the bulk of the table; re-texting all of them every refresh is what
-            # makes a large store feel laggy.
-            signature = None if row.run_id else (row.state, row.stale, row.pid,
-                                                 row.agent, row.cwd, row.title)
-            if not rebuild and signature is not None and self._row_signatures.get(row.key) == signature:
+            bucket = seconds if row.last > recent_cutoff else seconds // 60
+            cached = self._derived.get(row.key)
+            if (cached is None or cached[0] != row.last or cached[1] != bucket
+                    or cached[2] != row.cwd):
+                cached = self._derived[row.key] = (
+                    row.last, bucket, row.cwd, age(row.last),
+                    Path(row.cwd).name or row.cwd or "unknown")
+            values = {"agent": row.agent, "project": cached[4], "age": cached[3],
+                      "title": row.title or "(untitled)"}
+            signature = (row.agent, row.cwd, row.title, row.status, cached[3])
+            if not rebuild and self._row_signatures.get(row.key) == signature:
                 continue
-            values = {"state": row.state + ("*" if row.stale else ""), "agent": row.agent,
-                      "pid": str(row.pid or "—"), "age": age(row.created_at) if row.run_id else "—",
-                      "project": Path(row.cwd).name or row.cwd or "unknown", "title": row.title or "(untitled)"}
-            cells = []
-            for column, _, _ in self._columns:
-                text = plain(values[column])
-                if column == "state" and not self.no_color:
-                    text.stylize({"LIVE": "green", "START": "yellow", "EXIT": "bright_black",
-                                  "UNKNOWN": "yellow", "MISSING": "yellow", "HIST": "cyan"}.get(row.state, ""))
-                cells.append(text)
+            cells = [plain(values[column]) for column, _, _ in self._columns]
             if rebuild:
                 table.add_row(*cells, key=row.key)
             else:
@@ -403,25 +361,28 @@ class FourtopApp(App[tuple | None]):
             self._row_signatures[row.key] = signature
         self._keys = keys
         if keys:
-            index = keys.index(self.selected_key) if self.selected_key in keys else min(table.cursor_row, len(keys)-1)
+            index = keys.index(self.selected_key) if self.selected_key in keys else min(table.cursor_row, len(keys) - 1)
             table.move_cursor(row=max(0, index), animate=False)
             self.selected_key = keys[max(0, index)]
-        counts = Counter(row.state for row in self.snapshot_data.rows)
-        scope = "FULL SEARCH" if self._full_keys is not None else "ALL HISTORY" if self.show_history or not has_runtime else "RUNTIMES"
-        label = f"{counts['LIVE']} live · {counts['EXIT']} exited · {counts['HIST']} history  /  {scope}  /  {len(rows)} shown"
+        scope = "FULL SEARCH" if self._full_keys is not None else "REMOTE" if self.manager.remote else "LOCAL"
+        total = len(self.snapshot_data.rows)
+        label = f"{total} sessions · {self.snapshot_data.scope} · {scope} · {len(rows)} shown"
+        if self.stale:
+            label += " · STALE"
         if self.manager.demo:
             label = "SYNTHETIC DEMO · no real data or processes  /  " + label
         self.query_one("#counts", Static).update(plain(label))
         self.show_selection()
         issues = self._full_issues + self.snapshot_data.issues
-        message = self._status_message or (" · ".join(issues[:2]) if issues else "HIST = no verified live association. q closes only this panel.")
+        message = self._status_message or (" · ".join(issues[:2]) if issues
+                                           else "Resuming starts a new process; nothing is attached.")
         if self._full_running:
-            message = "Searching decoded raw records… Esc cancels. Runtime refresh remains active."
+            message = "Searching decoded raw records… Esc cancels. The table stays usable."
         elif not rows and not terms:
-            message = "No work found. Press n to start an agent, or try 4top --demo. " + message
+            message = "No sessions found. Press n to start an agent, or try 4top --demo. " + message
         self.query_one("#status", Static).update(plain(message))
 
-    def current(self) -> ViewRow | None:
+    def current(self) -> Session | None:
         table = self.query_one("#table", DataTable)
         index = table.cursor_row
         return self.shown[index] if 0 <= index < len(self.shown) else None
@@ -429,10 +390,12 @@ class FourtopApp(App[tuple | None]):
     def show_selection(self):
         row = self.current()
         if not row:
-            self.query_one("#selection", Static).update("No selection. Clear search or enable history.")
+            self.query_one("#selection", Static).update("No selection. Clear the search or press r.")
             return
-        verb = "preview only" if self.manager.demo else "attach to original process" if row.can_attach else "review native resume" if row.can_resume else "inspect details"
-        info = f"{row.agent} · {row.cwd}\nEnter: {verb} · {row.key} · {row.binding}"
+        verb = ("preview only" if self.manager.demo else
+                f"resume on {row.host}…" if self.manager.remote else
+                "resume as a new process…" if row.can_resume else "inspect details")
+        info = f"{row.agent} · {row.cwd}\nEnter: {verb} · {row.key}"
         self.query_one("#selection", Static).update(plain(info, multiline=True))
 
     @on(DataTable.RowHighlighted)
@@ -478,14 +441,11 @@ class FourtopApp(App[tuple | None]):
         self.query_one("#table", DataTable).focus()
         self.render_rows()
 
-    def action_history(self):
-        self.show_history = not self.show_history
-        self.render_rows()
-
     def action_refresh(self):
         self._status_message = ""
-        self.run_worker(self.refresh_history())
-        self.run_worker(self.refresh_runtime())
+        if not self.manager.remote:
+            self.run_worker(self.refresh_history())
+        self.run_worker(self.refresh_rows())
 
     def action_full_search(self):
         query = self.query_one("#query", Input).value
@@ -524,11 +484,14 @@ class FourtopApp(App[tuple | None]):
 
     def action_new(self):
         if self.manager.demo:
-            self.set_status("DEMO is read-only. No agent or tmux process will be started.")
+            self.set_status("DEMO is read-only. No agent will be started.")
+        elif self.manager.remote:
+            self.set_status(f"Start agents on {self.manager.scope} with "
+                            f"`4top --host {self.manager.scope} new AGENT`.")
         elif self._launching:
-            self.set_status("A startup handoff is already in progress in this panel.")
+            self.set_status("A launch is already in progress in this panel.")
         else:
-            self.push_screen(NewRuntime(os.getcwd()), self._new_result)
+            self.push_screen(NewAgent(os.getcwd()), self._new_result)
 
     def _new_result(self, values):
         if values:
@@ -536,62 +499,15 @@ class FourtopApp(App[tuple | None]):
 
     async def _start(self, values):
         self._launching = True
-        self.set_status("Starting native agent; waiting for a verified terminal handoff…")
         try:
-            run = await asyncio.to_thread(self.manager.new, *values)
-            self.selected_key = "r_" + run["run_id"]
-            await self.refresh_runtime()
-            self._attach_runtime(run["run_id"])
+            plan = await asyncio.to_thread(self.manager.new, *values)
         except (FourtopError, OSError, ValueError) as exc:
-            self.push_screen(NewRuntime(values[1], clean_text(str(exc)), values), self._new_result)
-        finally:
             self._launching = False
-
-    def _attach_runtime(self, run_id):
-        self._save_view()
-        if self.manager.tmux.is_inside():
-            self.exit(("attach", run_id))
+            self.push_screen(NewAgent(values[1], clean_text(str(exc)), values), self._new_result)
             return
-        try:
-            with self.suspend():
-                self.manager.attach(run_id)
-            self.set_status("Returned from tmux. The original process was not restarted.")
-        except (FourtopError, OSError, ValueError) as exc:
-            self.set_status(str(exc))
-        self.run_worker(self.refresh_runtime())
-
-    async def open_current(self):
-        row = self.current()
-        if not row:
-            return
-        if self.manager.demo:
-            self.action_preview()
-        elif row.can_attach and row.run_id and not row.stale:
-            self._attach_runtime(row.run_id)
-        elif row.can_resume and row.history_key and not row.stale:
-            message = (f"This creates a NEW {row.agent} process.\nDirectory: {row.cwd}\n"
-                       f"History: {row.history_key}\nNative ID: {row.history.native_id if row.history else 'unknown'}\n"
-                       "Current native configuration applies; original launch flags are not replayed.\n"
-                       "Native execution may modify files or incur model costs.")
-            self.push_screen(Confirm("Resume native history", message),
-                             lambda answer: self.run_worker(self._resume(row.history_key)) if answer else None)
-        else:
-            self.action_details()
-
-    async def _resume(self, history_key):
-        if self._launching:
-            self.set_status("A launch is already in progress in this panel.")
-            return
-        self._launching = True
-        try:
-            run = await asyncio.to_thread(self.manager.resume, history_key)
-            self.selected_key = "r_" + run["run_id"]
-            await self.refresh_runtime()
-            self._attach_runtime(run["run_id"])
-        except (FourtopError, OSError, ValueError) as exc:
-            self.set_status(str(exc))
-        finally:
-            self._launching = False
+        self._launching = False
+        self._hand_over(lambda: self.manager.run(plan), f"Starting {plan.agent} in this terminal…",
+                        f"Run `4top new {plan.agent}` instead.")
 
     def action_details(self):
         row = self.current()
@@ -599,49 +515,86 @@ class FourtopApp(App[tuple | None]):
             self.push_screen(Details(row, self.manager.demo), lambda action: self._detail_action(row, action))
 
     def _detail_action(self, row, action):
-        if not action or not row.run_id or self.manager.demo:
+        if action != "resume" or self.manager.demo:
             return
-        if action == "link":
-            self.push_screen(LinkHistory(), lambda key: self._confirm_link(row, key))
-            return
-        message = f"{row.agent} · {row.cwd}\nRun: {row.run_id}\n"
-        message += ("Close this exact managed pane? In-flight writes may be interrupted. "
-                    "Attach and exit natively for graceful shutdown." if action == "terminate" else
-                    "Hide this exited runtime? Native history and project files are left untouched.")
-        self.push_screen(Confirm(action.capitalize() + " runtime", message, action == "terminate"),
-                         lambda answer: self.run_worker(self._mutate(action, row.run_id)) if answer else None)
+        self._confirm_resume(row)
 
-    def _confirm_link(self, row, key):
-        if not key:
+    async def open_current(self):
+        row = self.current()
+        if not row:
             return
-        self.push_screen(Confirm("Link history", f"Runtime: {row.run_id}\nHistory: {key}\n"
-                                 "You confirm this association. Current context will still be marked unobserved."),
-                         lambda answer: self.run_worker(self._mutate("link", row.run_id, key)) if answer else None)
+        if self.manager.demo:
+            self.action_preview()
+        elif row.can_resume:
+            self._confirm_resume(row)
+        else:
+            self.action_details()
 
-    async def _mutate(self, action, *args):
+    def _confirm_resume(self, row: Session):
+        if self._launching:
+            self.set_status("A launch is already in progress in this panel.")
+            return
+        if self.manager.remote:
+            message = (f"This runs on {row.host} through ssh and creates a NEW {row.agent} process there.\n"
+                       f"Directory: {row.cwd}\nSession: {row.key}\n"
+                       "The remote CLI uses its current native configuration.")
+            self.push_screen(Confirm("Resume on " + row.host, message),
+                             lambda answer: self.run_worker(self._resume(row)) if answer else None)
+            return
+        native = row.record.native_id if row.record else None
+        message = (f"This creates a NEW {row.agent} process.\nDirectory: {row.cwd}\n"
+                   f"Session: {row.key}\nNative ID: {native or 'exact source path'}\n"
+                   "Current native configuration applies; original launch flags are not replayed.\n"
+                   "Native execution may modify files or incur model costs.")
+        self.push_screen(Confirm("Resume session", message),
+                         lambda answer: self.run_worker(self._resume(row)) if answer else None)
+
+    async def _resume(self, row: Session):
+        self._launching = True
         try:
-            await asyncio.to_thread(getattr(self.manager, action), *args)
-            self.set_status(action.capitalize() + " completed.")
-            await self.refresh_runtime()
+            if self.manager.remote:
+                command = self.manager.remote_argv(["resume", row.key, "--yes"])
+                self._launching = False
+                self._hand_over(lambda: subprocess.call(command), f"Resuming on {row.host}…",
+                                f"Run `4top --host {row.host} resume {row.key}` instead.")
+                return
+            plan = await asyncio.to_thread(self.manager.resume, row.key)
+        except (FourtopError, OSError, ValueError) as exc:
+            self._launching = False
+            self.set_status(str(exc))
+            return
+        self._launching = False
+        self._hand_over(lambda: self.manager.run(plan), f"Resuming {plan.agent} in this terminal…",
+                        f"Run `4top resume {row.key}` instead.")
+
+    def _hand_over(self, action, message: str, fallback: str = ""):
+        self.set_status(message)
+        self._save_view()
+        try:
+            with self.suspend():
+                action()
+        except SuspendNotSupported:
+            self.set_status(f"This terminal cannot hand over control. {fallback}".strip())
         except (FourtopError, OSError, ValueError) as exc:
             self.set_status(str(exc))
+        self.run_worker(self.refresh_rows())
 
     def action_help(self):
         self.push_screen(Confirm("4top keys & safety", "\n".join((
-            "↑ / ↓: select   Enter: attach or review native resume", "/: search metadata   Ctrl-F: explicit full-content search",
-            "h: include history   Space: read-only preview   i: details / safe actions",
+            "↑ / ↓: select   Enter: review native resume   /: search metadata",
+            "Ctrl-F: explicit full-content search   Space: read-only preview   i: details",
             "n: new agent   r: refresh   q / Ctrl-C: close only the panel",
-            "Esc: close dialog, cancel full search or clear query",
-            "Attach preserves a process; Resume creates a new one.",
-            "Use your tmux prefix followed by d to detach. Custom bindings are not changed.",
-            "Inside tmux: the panel exits before switching your exact client; use tmux's previous-session action to return.",
-            "No automatic process restart, model calls, or telemetry.",
+            "Esc: close dialog, cancel full search or clear the query",
+            "4top tracks no process: Resume always starts a new one from the transcript.",
+            "A resumed agent cannot recover memory, shell children or network state.",
+            "Deep search reads only approved local sources and executes nothing.",
+            "No automatic restart, model calls, or telemetry.",
         ))))
 
     def _save_view(self):
         if not self.manager.demo:
             with contextlib.suppress(OSError, FourtopError):
-                self.manager.store.save_view(self.selected_key, self.show_history)
+                self.manager.store.save_view(self.selected_key)
 
     def action_quit(self):
         self._save_view()

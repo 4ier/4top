@@ -1,5 +1,11 @@
 # 0.1.0a2 — developer Mac acceptance
 
+> **Historical note (added later).** This record describes the release before the
+> runtime layer was deleted. The tmux, attach/detach, pane-retention and exit-code
+> evidence below no longer describes the current development line, which tracks
+> sessions rather than processes. The parsing, installation and native-resume
+> findings remain relevant.
+
 Date: **2026-09-24**. Result: the Mac automated suite, clean-wheel installation
 and the scoped native Codex smoke check passed. This is an **alpha**
 acceptance record, not a stable release or a claim that every design gate passed.

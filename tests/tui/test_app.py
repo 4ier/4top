@@ -4,7 +4,8 @@ from types import SimpleNamespace
 import pytest
 from textual.widgets import DataTable, Input, Static
 
-from fourtop.app import Confirm, Details, FourtopApp, NewRuntime, Preview
+from fourtop.app import Confirm, Details, FourtopApp, NewAgent, Preview
+from fourtop.models import LaunchPlan
 from fourtop.services import DemoManager
 
 
@@ -12,20 +13,26 @@ class _ViewOnlyManager:
     """Minimal non-demo manager: only the persisted view is read at construction."""
 
     demo = False
+    remote = False
+    host = None
 
     def __init__(self, view):
         self.config = SimpleNamespace(color="auto", refresh_seconds=1.0, history_refresh_seconds=5.0)
         self.store = SimpleNamespace(load_view=lambda: view)
 
 
+def test_stored_selection_is_restored():
+    assert FourtopApp(_ViewOnlyManager({})).selected_key is None
+    assert FourtopApp(_ViewOnlyManager({"selected": "h_keep"})).selected_key == "h_keep"
+
+
 @pytest.mark.asyncio
-async def test_demo_keyboard_search_history_and_preview():
+async def test_demo_keyboard_search_and_preview():
     app = FourtopApp(DemoManager())
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
         assert len(app.shown) == 6
-        await pilot.press("h")
-        assert len(app.shown) == 4
+        assert "6 sessions" in str(app.query_one("#counts", Static).render())
         await pilot.press("slash")
         app.query_one("#query", Input).value = "中文"
         await pilot.pause()
@@ -46,13 +53,13 @@ async def test_selection_survives_refresh_reorder_and_insertion():
         await pilot.pause(.2)
         await pilot.press("down")
         selected = app.current().key
-        manager.rows.insert(0, replace(manager.rows[0], key="new-demo", run_id="new-demo-run"))
-        await app.refresh_runtime()
+        manager.rows.insert(0, replace(manager.rows[0], key="new-demo"))
+        await app.refresh_rows()
         assert app.current().key == selected
         assert app.selected_key == selected
         await pilot.resize_terminal(46, 16)
         await pilot.pause()
-        assert len(app._columns) == 3
+        assert len(app._columns) == 2
         assert app.current().key == selected
         await pilot.press("q")
 
@@ -64,14 +71,13 @@ async def test_demo_mutations_are_disabled_and_raw_markup_not_rendered():
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        cell = app.query_one(DataTable).get_cell("demo_1", "title")
-        assert cell.plain == "[red]literal[/red]"
+        assert app.query_one(DataTable).get_cell("demo_1", "title").plain == "[red]literal[/red]"
         await pilot.press("n")
-        assert not isinstance(app.screen, NewRuntime)
+        assert not isinstance(app.screen, NewAgent)
         assert "read-only" in str(app.query_one("#status", Static).render())
         await pilot.press("i")
         assert isinstance(app.screen, Details)
-        assert app.screen.query_one("#terminate").disabled
+        assert app.screen.query_one("#resume").disabled
         await pilot.press("escape", "q")
 
 
@@ -79,9 +85,9 @@ async def test_demo_mutations_are_disabled_and_raw_markup_not_rendered():
 async def test_confirmation_defaults_to_cancel():
     app = FourtopApp(DemoManager())
     outcome = []
-    async with app.run_test(size=(80,24)) as pilot:
+    async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause(.2)
-        app.push_screen(Confirm("Terminate", "Exact target?", destructive=True), outcome.append)
+        app.push_screen(Confirm("Resume", "Exact target?", destructive=True), outcome.append)
         await pilot.pause()
         assert app.focused.id == "cancel"
         await pilot.press("enter")
@@ -96,8 +102,9 @@ async def test_full_search_cancels_without_overwriting_newer_query():
             if full:
                 cancel.wait(2)
             return super().search(query)
+
     app = FourtopApp(SlowDemo())
-    async with app.run_test(size=(100,30)) as pilot:
+    async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
         await pilot.press("slash")
         app.query_one("#query", Input).value = "codex"
@@ -114,33 +121,17 @@ async def test_full_search_cancels_without_overwriting_newer_query():
 @pytest.mark.asyncio
 async def test_q_is_text_while_typing_in_search():
     app = FourtopApp(DemoManager())
-    async with app.run_test(size=(80,24)) as pilot:
+    async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause(.2)
         await pilot.press("slash", "q")
         assert app.query_one("#query", Input).value == "q"
         await pilot.press("escape", "q")
 
 
-def test_legacy_view_does_not_hide_history():
-    # Schema 1 wrote history=false as its own default, so it carries no intent.
-    app = FourtopApp(_ViewOnlyManager({"schema_version": 1, "selected": None, "history": False}))
-    assert app.show_history is True
-
-
-def test_explicit_history_off_is_honored():
-    app = FourtopApp(_ViewOnlyManager({"schema_version": 2, "selected": None, "history": False}))
-    assert app.show_history is False
-
-
-def test_absent_view_keeps_history_on():
-    app = FourtopApp(_ViewOnlyManager({}))
-    assert app.show_history is True
-
-
 @pytest.mark.asyncio
-async def test_unchanged_history_rows_are_not_retexted(monkeypatch):
-    # Re-texting every cell of a large history store on each refresh is what makes
-    # the table feel laggy, so unchanged rows must be skipped entirely.
+async def test_unchanged_rows_are_not_retexted(monkeypatch):
+    # Re-texting every cell of a large store on each refresh is what makes the
+    # table feel laggy, so unchanged rows must be skipped entirely.
     import fourtop.app as app_module
 
     calls = []
@@ -152,17 +143,12 @@ async def test_unchanged_history_rows_are_not_retexted(monkeypatch):
 
     monkeypatch.setattr(app_module, "plain", counting)
 
-    class HistoryOnlyDemo(DemoManager):
-        def __init__(self):
-            super().__init__()
-            self.rows = [row for row in self.rows if row.state == "HIST"]
-
-    manager = HistoryOnlyDemo()
+    manager = DemoManager()
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
         titles = {row.title for row in app.shown}
-        assert len(titles) == 2 and titles <= set(calls)  # rendered once for real
+        assert len(titles) == 6 and titles <= set(calls)  # rendered once for real
 
         calls.clear()
         app.render_rows()
@@ -170,6 +156,67 @@ async def test_unchanged_history_rows_are_not_retexted(monkeypatch):
         assert not (titles & set(calls))  # unchanged rows are not re-texted
 
         manager.rows[0] = replace(manager.rows[0], title="changed title")
-        await app.refresh_runtime()  # a real change must still repaint
+        await app.refresh_rows()  # a real change must still repaint
         assert "changed title" in calls
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_enter_confirms_before_resuming_and_runs_the_plan():
+    calls = []
+
+    class RecordingDemo(DemoManager):
+        demo = False
+        store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
+
+        def resume(self, query, cwd=None):
+            calls.append(("resume", query))
+            return LaunchPlan("pi", "/fake/pi", ("/fake/pi",), "/demo", {})
+
+        def run(self, plan):
+            calls.append(("run", plan))
+            return 0
+
+    manager = RecordingDemo()
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        assert app.current().can_resume
+        key = app.current().key
+        await pilot.press("enter")
+        await pilot.pause()
+        assert isinstance(app.screen, Confirm)
+        assert calls == []  # nothing happens before explicit approval
+        app.screen.query_one("#confirm").press()
+        await pilot.pause(.3)
+        assert calls == [("resume", key)]
+        # A headless driver cannot hand the terminal over; it must say so instead of crashing.
+        assert "cannot hand over control" in str(app.query_one("#status", Static).render())
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_cursor_rows_are_preview_only():
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        row = next(value for value in app.shown if value.agent == "cursor")
+        assert not row.can_resume
+        app.selected_key = row.key
+        app.render_rows()
+        assert "preview only" in str(app.query_one("#selection", Static).render())
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_derived_labels_follow_row_changes():
+    manager = DemoManager()
+    app = FourtopApp(manager)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(.2)
+        assert app.query_one(DataTable).get_cell("demo_1", "project").plain == "api-service"
+        manager.rows[0] = replace(manager.rows[0], cwd="/demo/renamed-project")
+        await app.refresh_rows()
+        # The cached project label must not outlive the row it was derived from.
+        assert app.query_one(DataTable).get_cell("demo_1", "project").plain == "renamed-project"
         await pilot.press("q")

@@ -2,28 +2,27 @@
 
 **Your coding agents, one terminal.**
 
-Find your work. Attach to the original process. Resume an exact native history.
-A keyboard-first terminal dashboard built on **tmux + session-ls**, with no extra
-4top daemon, account, model calls, or telemetry.
+Find your work. Resume an exact native session. Reach your other machines over SSH.
+A keyboard-first terminal dashboard built on **session-ls**, with no extra 4top
+daemon, account, model calls, or telemetry.
 
-[中文](README.zh-CN.md) · [Compatibility](docs/compatibility.md) · [Acceptance](docs/validation/README.md)
+[中文](README.zh-CN.md) · [Compatibility](docs/compatibility.md) · [Remote hosts](docs/remote-design.md) · [Acceptance](docs/validation/README.md)
 
 ![4top synthetic demo — no real user history](docs/demo/demo.svg)
 
-> **0.1.0a2 — alpha.** Real tmux/PTY tests pass on the Mac acceptance host.
-> Codex **0.155.1** also passed separate authenticated
-> attach/detach and exact-resume smoke checks there. Drivers remain experimental;
-> Pi and other native versions are not certified. [Evidence](docs/validation/macos-0.1.0a2.md).
-> This release is not on PyPI.
+> **0.1.0a2 — alpha.** The current development line no longer owns processes or
+> drives a multiplexer, so the tmux/PTY evidence in earlier records describes the
+> previous model. Codex **0.155.1** passed authenticated exact-resume smoke checks;
+> Claude Code, Pi and other native versions are not certified.
+> [Evidence](docs/validation/macos-0.1.0a2.md). This release is not on PyPI.
 
 ## Install from this checkout
 
-macOS or Linux; **Python 3.11+ and tmux 3.3+**. Current validation records, rather
-than this minimum target, determine which versions have actually been tested.
+macOS or Linux; **Python 3.11+**. No multiplexer is required. Current validation
+records, rather than this minimum target, determine which versions were tested.
 Windows users need a Linux environment such as WSL; native Windows is unsupported.
 
 ```sh
-# Install tmux using your OS package manager, then:
 git clone https://github.com/4ier/4top.git
 cd 4top
 python3 -m venv .venv
@@ -35,13 +34,11 @@ Both local packages are intentionally supplied to pip: `session-ls 0.2.0` is not
 assumed to exist on a package registry. The root wheel contains only `fourtop`;
 the independent `session-ls` package retains its small, stdlib-only CLI.
 
-Use `.venv/bin/4top` below, or activate the environment:
-
 ```sh
 . .venv/bin/activate
-4top                         # live work and local history, unified
-4top new codex               # launch in this directory, then attach
-4top new claude --detach     # start without taking over this terminal
+4top                       # browse every session on this machine
+4top new codex             # start an agent here, in this terminal
+4top --host build-box      # view another machine over ssh
 ```
 
 4top never installs or authenticates agents for you. Install the original Claude
@@ -50,23 +47,22 @@ The panel also reads Cursor transcripts, but does not launch or resume Cursor.
 
 ## The daily loop
 
-Open `4top`, select a row, press **Enter**. A verified live row attaches to its
-original terminal. A history row asks for confirmation before creating a new
-native process. Press your configured tmux prefix and then `d` to detach; from an
-outer terminal, the same 4top view returns. **`q` closes only the panel.**
+Open `4top` and you get every session on the machine, most recent first. Select a
+row and press **Enter**: 4top asks for confirmation and then runs the native CLI
+in this terminal to resume that exact session. Leave the agent and you are back in
+the panel. **`q` closes only the panel.**
 
-Inside an existing tmux server, 4top restores the terminal and switches the one
-provable calling client. It does not nest tmux, pick an arbitrary client, or
-kick other clients off. The panel exits before the switch; use your own tmux
-previous-session binding to return to the caller. Shared caller sessions require
-an explicit `--client` through the CLI. Cross-socket nested attach is refused.
+Byobu, tmux, screen, or a bare terminal are equally fine: 4top starts the agent in
+the terminal you are already using and never creates a pane of its own. If you want
+a session to survive closing your laptop, run 4top inside whichever multiplexer you
+already use.
 
 | Key | Action |
 | --- | --- |
-| `↑` / `↓`, `Enter` | Select and open |
+| `↑` / `↓`, `Enter` | Select and resume |
 | `/`, `Enter`, `Esc` | Search metadata, return to table, clear/cancel |
 | `Ctrl-F` | Explicit literal full-content search; `Esc` cancels |
-| `h`, `Space`, `i` | Toggle history, read-only preview, details/actions |
+| `Space`, `i` | Read-only preview, details |
 | `n`, `r`, `?`, `q` | New agent, refresh, help, close panel |
 
 Search supports case-insensitive words and quoted phrases; all terms must match.
@@ -74,51 +70,74 @@ Full search decodes JSON text, including Chinese escaped as `\u....`. It reads
 only configured sources, reports partial scans, and never executes transcript
 content. The UI renders titles and previews as plain, sanitized text.
 
-## Attach and resume have different guarantees
+## Sessions, not processes
 
-**Attach** reconnects to a verified process. It does not restart the CLI or reload
-its history. tmux, the host, and the process must still exist.
+A native agent is a file. `pi --session <path>`, `claude --resume <id>` and
+`codex resume <id>` all work from the transcript alone, so the transcript is the
+thing 4top tracks, and the process is the ephemeral part.
 
-**Resume** starts a new native process with an exact ID or source path. It cannot
+**Resume** starts a new native process from an exact ID or source path. It cannot
 restore lost memory, network connections, shell children, or a destroyed machine.
 Resume uses the CLI's **current native configuration**; 4top does not replay the
-original launch flags. A one-off read-only flag on `new` is not a persistent
-4top resume policy. Review native permissions before sending another task.
-`HIST` means there is no verified live association; an externally launched agent
-might still be running elsewhere.
+original launch flags. Review native permissions before sending another task.
+
+Because 4top owns no process it also reports no liveness: no `LIVE`, no `EXIT`, no
+`MISSING`. A row is a session you can resume, and that is all it claims. Failed
+queries are reported as issues and never rendered as an empty machine.
+
+Two consequences worth knowing. A resumed agent is a **new** process; two agents in
+one directory still have **no code/worktree isolation**. And `4top new` runs the
+agent in the foreground of the terminal you launched it from: if you are not inside
+byobu or tmux, it ends with that terminal.
+
+## Remote hosts over SSH
+
+Point 4top at any machine you can already `ssh` into. There is no daemon to
+install, no port to open, and no credential store: the remote side is the same
+CLI, and the local 4top only runs it.
+
+```toml
+# ~/.config/4top/config.toml
+[hosts.build-box]
+ssh = "me@build-box"                 # any ssh destination, including a tailnet name
+# command = "/opt/4top/bin/4top"     # if a non-login PATH does not include 4top
+# refresh_seconds = 15.0
+```
 
 ```sh
-4top list --json
-4top search 'retry "database timeout"'
-4top search '中文' --full
-4top attach r_<run-uuid>
-4top resume h_<history-key> --yes --detach
-4top link r_<run-uuid> h_<history-key> --yes
+4top --host build-box              # the whole panel, scoped to that host
+4top --host build-box list --json
+4top --host me@10.0.0.4 doctor     # an unconfigured target works too
+```
+
+Views stay isolated: the default scope is this machine, and `--host` replaces it
+rather than merging machines into one table. Anything that starts a process runs
+**on that host** through `ssh -t`, so the resumed agent lives where its history
+lives; the remote CLI does the work and the local side only hands over the
+terminal. Connection reuse (`ControlMaster`) keeps refreshes cheap, `BatchMode`
+means a missing key fails fast instead of prompting, and a remote that speaks a
+different row schema is refused instead of partially parsed.
+
+## Command line
+
+```sh
+4top list --json                          # one JSON object per row
+4top list --agent pi --project 4top
+4top search 'retry "database timeout"'    # metadata match
+4top search '中文' --full                  # decoded full-content search
+4top preview h_<key>                      # one bounded read-only page
+4top new codex -- --model MODEL           # native arguments after --
+4top resume h_<key> --yes                 # restore this process as the agent
 4top doctor --json
 ```
 
-IDs may be shortened only when their prefixes are unambiguous (at least four
-characters). Row numbers are never execution targets. `resume` rejects duplicate
-4top-managed launches across all recorded local sockets. It cannot police agents
-started outside 4top, other users, other state directories, or remote machines.
+`--config`, `--host` and `--no-color` work before or after the subcommand. Keys
+may be shortened only when their prefixes are unambiguous (at least four
+characters). Row numbers are never execution targets. `list --json` rows carry
+`schema_version`, `key`, `agent`, `host`, `cwd`, `title`, `started`, `last`,
+`source`, `status` and `can_resume`.
 
-## Honest state, no guessing
-
-`LIVE` means the managed terminal's recorded process and ownership markers were
-verified. It does not mean the agent is thinking. `EXIT` reports process exit,
-not task success. `START`, `UNKNOWN`, `MISSING`, and stale observations are shown
-explicitly; failed queries never become an empty, supposedly idle machine.
-
-New Codex runs are initially **unlinked**. A matching directory or modification
-time is only a clue, not identity. Explicitly link a history when needed. A launch
-association remains a **launch** association: `/new`, `/resume`, or a native fork
-can change current context without notifying 4top. The details screen says so.
-
-Normal terminals cannot be moved into tmux retroactively. Start future work with
-`4top new`; existing transcripts remain searchable. Multiple agents in one
-working directory have **no code/worktree isolation**.
-
-## Configuration and safety
+## Configuration and privacy
 
 Optional configuration: `$XDG_CONFIG_HOME/4top/config.toml` (default
 `~/.config/4top/config.toml`). No setup file is needed for standard stores.
@@ -129,33 +148,22 @@ refresh_seconds = 1.0
 history_refresh_seconds = 5.0
 color = "auto"                         # or "none"; NO_COLOR is also supported
 
-[runtime]
-startup_handshake_seconds = 10.0        # startup protocol only, not agent duration
-control_timeout_seconds = 5.0
-# socket = "/absolute/path/to/tmux.sock"
+[history]
+metadata_max_bytes = 2097152
+metadata_max_lines = 2000
+preview_max_lines = 200
 
 [agents.codex]
 # root = "/absolute/path/to/codex-home"
 # executable = "/absolute/path/to/a-real-wrapper"
 ```
 
-`--config` and `--socket` also work before or after a subcommand. Agent store roots
-respect `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and `PI_CODING_AGENT_DIR`; an explicit
-configured root wins. Selected history and launch profile must agree.
-
-Native arguments go after `--`: `4top new codex -- --model MODEL`. Conflicting
-identity/directory/mode options are rejected. No permission-bypass, billing,
-concurrency, or total runtime limits are inserted. A confirmed native launch can
-modify files and use the agent's normal paid services.
-
-Runtime metadata is private local JSON under `$XDG_STATE_HOME/4top`; rebuildable
-metadata cache is under `$XDG_CACHE_HOME/4top`. Environment values and complete
-native argv travel through a private one-shot Unix socket, **not a payload file**.
-The helper `exec`s the original CLI. No 4top supervisor is left running.
-
-Use `i` → **Terminate** only when you intend to close a managed pane; in-flight
-writes can be interrupted. Prefer attaching and exiting natively for graceful
-shutdown. **Dismiss** hides an exited run without removing native history.
+Agent store roots respect `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and
+`PI_CODING_AGENT_DIR`; an explicit configured root wins. Selected history and
+launch profile must agree. Local state is private: `$XDG_STATE_HOME/4top` holds a
+local identity and your last selection, and `$XDG_CACHE_HOME/4top` holds
+rebuildable metadata. No environment values, prompt text, or transcripts are
+retained. The only network access is the ssh you configured.
 
 [Privacy](docs/privacy.md) · [Troubleshooting](docs/troubleshooting.md) · [Design](docs/design.md)
 
@@ -167,13 +175,13 @@ shutdown. **Dismiss** hides an exited run without removing native history.
 .venv/bin/python -m ruff check .
 ```
 
-Tests use private temporary HOME/state/socket directories and synthetic agents.
-No account credentials or model calls are required. Real PTY tests and Textual's
-headless tests are separate layers. Record your OS, Python, tmux, and native CLI
-versions when reporting compatibility. **Never post raw transcripts or tokens.**
+Tests use private temporary HOME/state directories and synthetic agents; the ssh
+tests use a fake `ssh` on `PATH`. No account credentials, network access or model
+calls are required. Record your OS, Python and native CLI versions when reporting
+compatibility. **Never post raw transcripts or tokens.**
 
 For fresh installation, CI, reproducible demo export, native smoke testing, and
 release gates, see [CONTRIBUTING](CONTRIBUTING.md) and the [acceptance guide](docs/validation/README.md).
 
-4top builds on 4ier's `session-ls` parsers and uses tmux and Textual. It is not
-affiliated with the vendors of the supported coding agents. **MIT licensed.**
+4top builds on 4ier's `session-ls` parsers and uses Textual. It is not affiliated
+with the vendors of the supported coding agents. **MIT licensed.**

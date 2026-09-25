@@ -2,11 +2,52 @@
 
 ## Unreleased
 
+### Breaking: 4top tracks sessions, not processes
+
+A native agent is recoverable from its transcript alone, so the transcript is the
+durable object and the process is the ephemeral one. 4top now keeps only
+transcripts: it does not own, supervise, attach to, or report on a process, and it
+no longer drives a multiplexer.
+
+- Deleted: the tmux backend, the one-shot launch handoff and its transport, run
+  records, reservations, locks and the operation log, the exit-code and Linux
+  zombie evidence, `attach`, `open`, `link`, `terminate`, `dismiss`, `--socket`,
+  `--client`, `--detach`, the `[runtime]` configuration section, and the `h`
+  history toggle. There is no `LIVE`/`EXIT`/`MISSING`/`UNKNOWN`/`HIST` state
+  because there is nothing live to observe.
+- `new` runs the agent in the calling terminal: the CLI replaces itself with the
+  agent (`execvpe`), and the TUI suspends, waits and returns to the panel.
+  Persistence across a disconnect belongs to byobu/tmux, which 4top neither
+  requires nor touches.
+- `list --json` rows are `schema_version` 2 and carry `key`, `agent`, `host`,
+  `cwd`, `title`, `started`, `last`, `source`, `status`, `problems` and
+  `can_resume`. Anything reading `state`, `run_id` or `pid` must be updated.
+- Local history is shown by default. The old view-schema `history` flag is
+  ignored and the view file is written as schema 3.
+- Nothing needs migrating: state is now a local identity plus the last selection.
+  Old run records are ignored and can be deleted. A new local identity changes
+  history keys, so anything that copied a key must copy it again.
+
+### Remote hosts over SSH
+
+- Add `[hosts.NAME]` with `ssh`, `command`, `refresh_seconds` and
+  `timeout_seconds`, plus the global `--host` option. Views are isolated:
+  `--host` replaces the local scope instead of merging machines into one table.
+- The remote side is the same CLI, with no daemon and no new port. It runs with
+  `BatchMode=yes` (a missing key fails fast), a `ControlMaster` socket inside
+  private state, and a hard timeout; every remote argument is quoted for the
+  remote shell.
+- A row whose `schema_version` differs is refused instead of partially parsed. A
+  remote row is relabelled with the configured host name, and its history key
+  stays opaque so it is never recomputed on the wrong machine.
+- `resume` and `new` with `--host` hand the terminal to `ssh -t`, so the process
+  is created on the machine that owns the history.
+
+### Fixes in this line
+
 - A large history no longer costs a full re-render on every refresh. Rows whose
-  inputs are unchanged keep their rendered cells, so a 2.7k-row store went from
-  about 50 ms to about 1 ms per refresh tick. The `age` cell still repaints for
-  managed runs, and any change to a row, the filters or the column layout still
-  rebuilds exactly what changed.
+  inputs are unchanged keep their rendered cells and their derived labels, so a
+  2.7k-row store renders in under two milliseconds per tick instead of about 50 ms.
 - Recognize Claude 2.1.x metadata-only session files. Claude prepends records such
   as `last-prompt`, `mode`, `attachment` and `cost-state`, and a session that was
   opened, renamed and quit never writes a user or assistant message; those files
@@ -16,10 +57,6 @@
   in both parsers, so the first scan after upgrading re-reads every file once.
 - Report why a history file was rejected, not only the exception class, and keep
   OSError text (which contains the private path) out of the message.
-- Show local history by default; `h` now toggles between all rows and
-  managed runs only. A stored `history: false` from the old schema 1 was written
-  by the previous default rather than by the user, so it is ignored instead of
-  hiding history after an upgrade. The view file is written as schema 2.
 - Correct the acceptance record: Pi 0.87.0 is installed on the acceptance Mac and
   its capability probe passes. No authenticated Pi smoke check was run, and the
   previous "not installed" statement was wrong.

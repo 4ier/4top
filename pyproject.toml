@@ -5,13 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "4top"
 version = "0.1.0a2"
-description = "Your coding agents, one terminal. Attach to live processes and find native history."
+description = "Your coding agents, one terminal. Find, search and resume native sessions, locally or over SSH."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{name = "4ier"}]
 dependencies = ["session-ls>=0.2.0,<0.3", "textual>=8.2.8,<9"]
-keywords = ["tmux", "coding-agents", "terminal", "claude", "codex", "pi"]
+keywords = ["coding-agents", "terminal", "session-history", "claude", "codex", "pi", "ssh"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console :: Curses",

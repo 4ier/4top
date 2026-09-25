@@ -1,8 +1,10 @@
 # Remote hosts (design note)
 
-Status: **proposal, not implemented.** This note replaces the "No multi-host
-aggregation" limit in [design.md](design.md) with a concrete scope. Nothing here
-is a compatibility promise until it ships with tests.
+Status: **implemented.** The runtime layer has been deleted and the read-only
+remote view plus remote actions are in the current development line. This note
+replaces the "No multi-host aggregation" limit in [design.md](design.md); the
+implementation notes below record what actually shipped and where it differs
+from the original plan.
 
 ## Decision
 
@@ -56,51 +58,50 @@ The remote side is not a new interface. It is the existing read-only CLI.
 ## Configuration
 
 ```toml
-[hosts.lazy4]
-ssh = "root@lazy4ier.heiyu.space"
+[hosts.build-box]
+ssh = "me@build-box"
 # command = "/absolute/path/to/4top"   # non-login PATH on the remote may differ
 # refresh_seconds = 15.0               # slower than local: each tick is a round trip
 # timeout_seconds = 10.0
-# byobu = true                         # remote actions open a byobu window
 ```
 
 `--host NAME` (or an ad-hoc `--host user@address`) is a global option with the
-same placement rules as `--config` and `--socket`. `4top doctor --host N` reports
-transport reachability, remote version, command resolution and remote state-dir
-health without writing anything on either side.
+same placement rules as `--config`. It is absent from the plan, not built: 4top
+does not open windows in anyone's multiplexer. `4top --host N doctor` reports the
+remote's own diagnosis plus the transport result, without writing on either side.
 
-## Phases
+## What shipped
 
-1. **Read-only remote view.** `list`/`search`/`doctor --host`, remote issues in the
-   existing status line, remote scope in the TUI, slower cadence, manual `r`.
-   Additive: no change to the local runtime layer.
-2. **Delete the runtime layer.** Remove ownership and exit evidence (list below),
-   and make `new` launch the agent in the current terminal instead of a
-   handoff-created pane. byobu or tmux, if present, is the user's own choice and
-   is not driven by 4top.
-3. **Remote actions.** `resume`/`new --host` run on the remote through `ssh -t`,
-   inside byobu when configured. The local TUI suspends and hands over the
-   terminal, which is the pattern already used for interactive clients.
+The runtime layer was deleted first, because the remote view would otherwise have
+been built twice on a row model that was about to change.
 
-Phase 1 is first because it is additive and answers the real need immediately.
-Phase 2 is second because it deletes rather than adds, and it is easier to do that
-calmly once the transport is proven.
+1. **Runtime layer deleted.** No run records, pane markers, liveness vocabulary,
+   exit evidence, handoff channel or multiplexer driver. `new` runs the agent in
+   the calling terminal; the CLI becomes it with `execvpe`, the TUI suspends and
+   waits. Row schema is 2 and the state directory holds only identity and view
+   preference.
+2. **Read-only remote view.** `[hosts.NAME]` plus `--host`, implemented in
+   `fourtop.hosts` over `ssh` with `BatchMode`, `ControlMaster`, a timeout and a
+   row-schema handshake. `doctor --host` reports the remote's own diagnosis.
+3. **Remote actions.** `resume` and `new` with `--host` hand the terminal to
+   `ssh -t`, so the process is created on the host that owns the history. The
+   remote CLI does the work; the local side only quotes arguments, hands over the
+   terminal and reports what the remote said.
 
-## Deletion candidates (phase 2, to be confirmed in the change)
+Not done, and deliberately: attaching to a process on another machine. There is
+no process to attach to, on any machine.
 
-- `state.py`: run records, reservations, locks, operation log.
-- `tmux.py`: `observe`/`verify`/`attach`/`terminate`, pane markers, server
-  identity, exit-code and zombie evidence.
-- `_launch.py`: the one-shot handoff channel.
-- `services.py`: run/history merge, live counts, socket-scoped filtering.
-- `app.py`: runtime row actions, `Dismiss`/`Terminate`, state vocabulary.
-- `config.py`: `runtime.socket`, `runtime.tmux`, `startup_handshake_seconds`,
-  `control_timeout_seconds`.
-- Tests: the real PTY/runtime suite, exit evidence, Linux zombie and handoff
-  cases. This is the largest single deletion.
+## Deleted
+
+`tmux.py`, `_launch.py`, `transport.py`, the `[runtime]` configuration section,
+run records, reservations, the operation log, the `LIVE`/`EXIT`/`MISSING`/
+`UNKNOWN`/`HIST` vocabulary, the exit-code and Linux zombie evidence, and the
+integrations that tested them. `pyproject.toml` no longer mentions tmux.
 
 Kept: the whole `session-ls` layer, metadata cache, resume planning, preview,
-search, privacy rules and `doctor`.
+search, privacy rules and `doctor`. The launch tests that replaced the pane
+tests run the real fake agent as a real process and assert its argv, cwd,
+environment and the session file it wrote.
 
 ## What this gives up
 

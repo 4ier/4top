@@ -44,7 +44,7 @@ def main():
         assert version == "4top 0.1.0a2", version
         demo = run([str(target / "bin/4top"), "--demo", "list", "--json"], env, root)
         rows = [json.loads(line) for line in demo.splitlines()]
-        assert len(rows) == 6 and all(row["schema_version"] == 1 for row in rows)
+        assert len(rows) == 6 and all(row["schema_version"] == 2 for row in rows)
         assert not (home / "state").exists(), "Demo wrote user state"
         legacy = run([str(target / "bin/session-ls"), "--json"], env, root)
         assert not legacy.strip(), "Isolated empty HOME must not discover caller history"
@@ -53,6 +53,7 @@ def main():
         installed = json.loads(run([python, "-m", "pip", "list", "--format=json"], env, root))
         print(json.dumps({"fresh_venv": True, "version": version, "demo_rows": len(rows),
                           "legacy_empty_home": True, "root_wheel_owns_core": False,
+                          "row_schema": 2,
                           "installed": installed}, indent=2))
 
 
