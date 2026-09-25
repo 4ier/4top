@@ -26,7 +26,19 @@ standard library available.
 - `new` without `--yes` in a non-interactive shell: exit 4 with an explicit message.
 - A remote speaking row schema 1: refused with exit 6 and no partial parse.
 
-## Two defects this run found
+## Second host: Ubuntu 26.04
+
+Same day, same Mac: Ubuntu 26.04.1 LTS x86_64, Python 3.14.4, reached over
+Tailscale, with **507 sessions** in real agent stores. `doctor`, `list` (human and
+JSON), `search` and `preview` were verified, and both sides reported no issues.
+
+The remote panel was also started there in demo mode over `ssh -t` and rendered,
+which exercises the UI stack on a host with no display, no package manager access
+and no PyPI reachability. Both hosts were installed without pip or a virtual
+environment: a self-contained Python tree plus a wrapper, with `command` pointing
+at the wrapper.
+
+## Three defects this run found
 
 - The human table needed `rich`, which only arrives with the terminal UI
   dependency, so a host with the standard library alone could not print a table.
@@ -34,9 +46,13 @@ standard library available.
 - A remote login banner on stderr was reported as a query issue, so a healthy host
   looked broken and the command exited 6. Only diagnostics prefixed by the remote
   CLI are issues now.
+- A plain marker file inside a store's project directory was matched by the history
+  pattern, opened as a directory and reported as unavailable, so a healthy store
+  reported an issue and exited 6 on every scan. A matched name that is not a
+  directory is now skipped.
 
 ## Not covered
 
 A real authenticated native agent on the remote, a remote where both sides were
-installed by pip rather than run from source, physical network loss, host-key
-changes, and Windows or macOS as the remote side.
+installed by pip rather than run from a self-contained tree, physical network loss,
+host-key changes, and Windows or macOS as the remote side.

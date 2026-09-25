@@ -58,6 +58,21 @@ local side only quotes the arguments, hands over the terminal and reports what t
 remote said. Persistence across a disconnect is the remote user's own multiplexer,
 not 4top's business.
 
+## Deploying the remote side
+
+The remote needs the CLI. A package install is the normal path; where pip, a
+virtual environment or PyPI access are unavailable, a self-contained Python tree
+works just as well: unpack 4top, its parsers and the UI stack into one directory,
+put a wrapper next to it, and point `command` at the wrapper.
+
+```sh
+# lib/ holds the packages, bin/4top is a two-line wrapper that sets PYTHONPATH
+4top --host NAME doctor          # reports the remote's Python and sources
+```
+
+Keep it somewhere the host considers durable, and give `command` an absolute path,
+because a non-interactive ssh shell does not read login profiles.
+
 ## Out of scope
 
 A daemon or port binding, discovery, a web interface, credentials stored in

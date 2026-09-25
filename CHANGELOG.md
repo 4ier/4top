@@ -59,6 +59,11 @@ terminal multiplexer of its own.
   with `unicodedata`, so `4top list` works where only the standard library is
   installed. Found by running the CLI on a host that had neither the UI dependency
   nor a package manager to add it.
+- Stop reporting a non-directory that a history pattern matched as an
+  unavailable directory. A real store keeps a marker file inside its project
+  directory, so every scan reported an issue and every list exited 6. A configured
+  root that is not a directory is still reported once, and a genuinely unreadable
+  directory is still reported.
 - Stop reporting a remote login banner as a query issue. Only diagnostics prefixed
   by the remote CLI count, so a healthy host no longer looks broken and no longer
   exits 6. Found by pointing `--host` at a machine whose ssh shell prints a banner.
