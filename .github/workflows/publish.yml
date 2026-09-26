@@ -95,6 +95,8 @@ jobs:
 
   release:
     needs: publish
+    # Only a tag is a release; the manual trigger rehearses the build and the gate.
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
