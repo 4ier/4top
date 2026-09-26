@@ -16,7 +16,12 @@ from .config import Config, Host
 from .errors import Unavailable
 from .models import ROW_SCHEMA, Session, Snapshot
 
-SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPersist=60")
+# BatchMode never prompts; ControlMaster reuses one warm connection (a handshake per
+# refresh is wasteful on a good link and painful on a bad one); the ServerAlive pair
+# turns a dead link into an error in about 45 seconds instead of a hang.
+SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPersist=60",
+               "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
+               "-o", "TCPKeepAlive=yes")
 
 
 def ssh_argv(config: Config, host: Host, args: list[str], *, tty: bool = False) -> list[str]:
@@ -122,6 +127,29 @@ def remote_preview(config: Config, host: Host, key: str, cursor: int = 0) -> str
     if code not in (0, 6):
         raise ssh_failure(host, code, err)
     return out
+
+
+def remote_check(config: Config, host: Host, key: str) -> dict:
+    """Ask the host that owns the session whether a resume is possible there."""
+    code, out, err = run_remote(config, host, ["check", key, "--json"])
+    if code == 2:
+        # argparse rejects an unknown subcommand with 2. Preflighting is an
+        # improvement, not a requirement, so a remote older than `check` is stated
+        # rather than blocking the action with a wall of usage text.
+        return {"key": key, "agent": None, "host": host.name, "native_id": None, "cwd": None,
+                "cwd_quality": None, "executable": None, "cwd_missing": False,
+                "resumable": None, "reason": f"{host.name} runs a 4top without `check`",
+                "status": None, "problems": []}
+    if code not in (0, 3):
+        raise ssh_failure(host, code, err)
+    try:
+        report = json.loads(out)
+    except ValueError:
+        raise Unavailable(f"{host.name}: check did not return JSON") from None
+    if not isinstance(report, dict):
+        raise Unavailable(f"{host.name}: check returned {type(report).__name__}")
+    report["host"] = host.name
+    return report
 
 
 def remote_doctor(config: Config, host: Host) -> dict:

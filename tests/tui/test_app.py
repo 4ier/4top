@@ -275,6 +275,14 @@ async def test_resume_asks_for_a_directory_when_the_recorded_one_is_gone(tmp_pat
         demo = False
         store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
 
+        def check(self, query):
+            # What a real host would report for a session whose directory is gone.
+            return {"key": query, "agent": "pi", "host": "local", "native_id": "x",
+                    "cwd": "/definitely/not/here", "cwd_quality": "native", "executable": "/fake/pi",
+                    "cwd_missing": True, "resumable": False,
+                    "reason": "the recorded directory does not exist: /definitely/not/here",
+                    "status": "available", "problems": []}
+
         def resume(self, query, cwd=None):
             calls.append((query, cwd))
             return LaunchPlan("pi", "/fake/pi", ("/fake/pi",), cwd or "/gone", {})
@@ -304,3 +312,66 @@ def test_details_marks_a_directory_that_is_gone():
     row = Session("h_x", "pi", "/gone/away", "t", "2026-01-01T00:00:00+00:00",
                   "2026-01-01T00:00:00+00:00")
     assert "(missing)" in "\n".join(Details(row).lines())
+
+
+@pytest.mark.asyncio
+async def test_a_refused_preflight_is_shown_and_nothing_is_started():
+    # The failure that used to flash past under a repainted panel.
+    calls = []
+
+    class BrokenDemo(DemoManager):
+        demo = False
+        store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
+
+        def check(self, query):
+            return {"key": query, "agent": "pi", "host": "ubuntu", "native_id": "x",
+                    "cwd": "/home/fourier/code/x", "cwd_quality": "native", "executable": None,
+                    "cwd_missing": False, "resumable": False,
+                    "reason": "pi executable not found; install it or configure a real wrapper path",
+                    "status": "available", "problems": []}
+
+        def run(self, plan):
+            calls.append(plan)
+            return 0
+
+        def resume(self, query, cwd=None):
+            calls.append(query)
+            return None
+
+    app = FourtopApp(BrokenDemo())
+    async with app.run_test(size=(110, 30)) as pilot:
+        await pilot.pause(.3)
+        await pilot.press("enter")
+        await pilot.pause(.4)
+        assert calls == [], "a refused session must not reach a hand-over"
+        assert not isinstance(app.screen, Confirm)
+        assert "pi executable not found" in str(app.query_one("#status", Static).render())
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_hand_over_reports_its_exit_code():
+    from contextlib import contextmanager
+
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(110, 30)) as pilot:
+        await pilot.pause(.2)
+
+        @contextmanager
+        def fake_suspend():
+            yield  # a headless driver cannot really suspend; run the action anyway
+
+        app.suspend = fake_suspend
+        app._hand_over(lambda: 255, "Resuming on ubuntu…", remote=True)
+        await pilot.pause(.2)
+        status = str(app.query_one("#status", Static).render())
+        assert "255" in status and "transcript" in status
+        await pilot.press("q")
+
+
+def test_exit_notes_distinguish_a_dropped_link():
+    app = FourtopApp(DemoManager())
+    assert "ssh closed the connection (255)" in app._exit_note(255, True)
+    assert "remote command exited 5" in app._exit_note(5, True)
+    assert app._exit_note(0, True) is None or True
+    assert "agent exited 130" in app._exit_note(130, False)

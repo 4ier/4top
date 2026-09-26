@@ -9,7 +9,7 @@ from fourtop.agents import validate_extra
 from fourtop.cli import main, parser
 from fourtop.config import Config
 from fourtop.errors import FourtopError
-from fourtop.services import unique
+from fourtop.services import Manager, unique
 
 SRC = Path(__file__).resolve().parents[2] / "src"
 
@@ -146,3 +146,50 @@ def test_human_table_needs_no_ui_stack(lab):
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stderr
     assert "AGENT" in result.stdout and "UPDATED" in result.stdout
+
+
+def write_pi_session(lab, cwd, native):
+    root = Path(lab.config.root("pi").path)
+    file = root / "sessions" / "test" / (native + ".jsonl")
+    file.parent.mkdir(parents=True, exist_ok=True)
+    file.write_text(json.dumps({"type": "session", "id": native, "cwd": cwd,
+                                "timestamp": "2026-09-24T00:00:00Z"}) + "\n" + json.dumps(
+        {"type": "message", "message": {"role": "user",
+         "content": [{"type": "text", "text": "hello"}]}}) + "\n")
+    return file
+
+
+def test_check_answers_whether_a_resume_would_work(lab):
+    native = "11111111-2222-3333-4444-555555555555"
+    write_pi_session(lab, str(lab.path), native)
+    write_pi_session(lab, "/definitely/not/here", "22222222-3333-4444-5555-666666666666")
+    records = lab.manager.history(force=True).records
+    here = next(record for record in records if record.cwd == str(lab.path))
+    gone = next(record for record in records if record.cwd == "/definitely/not/here")
+
+    report = lab.manager.check(here.key)
+    assert report["resumable"] is True and report["reason"] is None
+    assert report["cwd_missing"] is False and report["native_id"] == native
+
+    report = lab.manager.check(gone.key)
+    assert report["resumable"] is False and report["cwd_missing"] is True
+    assert "does not exist" in report["reason"]
+
+    # An agent that is not installed is the refusal that used to flash past.
+    config = lab.write_config('[agents.pi]\nexecutable = "no-such-agent-binary"\n')
+    manager = Manager(config)
+    try:
+        report = manager.check(here.key)
+        assert report["resumable"] is False and report["cwd_missing"] is False
+        assert "not found" in report["reason"]
+    finally:
+        manager.close()
+
+
+def test_check_command_exit_codes(lab, capsys):
+    native = "33333333-4444-5555-6666-777777777777"
+    write_pi_session(lab, "/definitely/not/here", native)
+    key = lab.manager.history(force=True).records[0].key
+    assert main(["--config", str(lab.config_file), "check", key, "--json"]) == 3
+    report = json.loads(capsys.readouterr().out)
+    assert report["resumable"] is False and report["cwd_missing"] is True

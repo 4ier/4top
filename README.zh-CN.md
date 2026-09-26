@@ -107,6 +107,7 @@ ssh = "me@build-box"                 # 任意 ssh 目标，包括 tailnet 名称
 4top search 'retry "database timeout"'    # 元数据匹配
 4top search '中文' --full                  # 解码后的全文搜索
 4top preview h_<key>                      # 一页只读摘录
+4top check h_<key> --json                 # 这个会话在这里能不能恢复，不能则给出原因
 4top new codex -- --model MODEL           # 原生参数放在 -- 之后
 4top resume h_<key> --yes                 # 把这个进程换成该 agent
 4top doctor --json

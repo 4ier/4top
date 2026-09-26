@@ -265,3 +265,35 @@ async def test_host_switch_does_not_keep_a_remote_selection(lab):
         app.action_quit()
         await pilot.pause()
     assert saved == []
+
+
+def test_remote_check_reports_a_refusal(remote):
+    load, rows = remote
+    rows.write_text(json.dumps({"key": "h_abc", "agent": "pi", "host": "local", "resumable": False,
+                                "reason": "pi executable not found", "cwd": "/srv/app",
+                                "cwd_missing": False, "cwd_quality": "native", "native_id": "x",
+                                "executable": None, "status": "available", "problems": []}) + "\n")
+    config, host = load(exit_code=3)
+    from fourtop.hosts import remote_check
+    report = remote_check(config, host, "h_abc")
+    assert report["host"] == "venus" and report["resumable"] is False
+
+
+def test_ssh_options_notice_a_dead_link(lab):
+    host = lab.config.resolve_host("me@venus")
+    argv = ssh_argv(lab.config, host, ["list"])
+    joined = " ".join(argv)
+    assert "ServerAliveInterval=15" in joined and "ServerAliveCountMax=3" in joined
+    assert "TCPKeepAlive=yes" in joined and "BatchMode=yes" in joined
+
+
+def test_a_remote_without_check_is_stated_not_fatal(remote):
+    # argparse answers an unknown subcommand with 2. Preflighting is an improvement,
+    # not a requirement, so an older remote must not block the action.
+    load, rows = remote
+    rows.write_text("")
+    config, host = load(exit_code=2)
+    from fourtop.hosts import remote_check
+    report = remote_check(config, host, "h_abc")
+    assert report["resumable"] is None
+    assert "without `check`" in report["reason"]

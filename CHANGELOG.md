@@ -57,6 +57,13 @@ terminal multiplexer of its own.
   "not accessible".
 - The mouse wheel moves the highlight with the view instead of scrolling the
   viewport away from it.
+- Resume preflights first. `4top check KEY` reports whether a session can resume
+  here, and the panel asks before it hands over the terminal, so a host without
+  that agent installed is a visible message instead of a failure that flashes past
+  under a repainted screen. A hand-over that still fails reports its exit code, and
+  a dropped ssh connection says that the session is unchanged in its transcript.
+- The ssh connection keeps a liveness probe and a warm control connection, so an
+  unstable link fails instead of hanging.
 - `scripts/check_docs.py` fails when the documentation stops describing the code,
   and runs in a pre-commit hook, the test suite and CI.
 

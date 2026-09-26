@@ -122,6 +122,13 @@ terminal. Connection reuse (`ControlMaster`) keeps refreshes cheap, `BatchMode`
 means a missing key fails fast instead of prompting, and a remote that speaks a
 different row schema is refused instead of partially parsed.
 
+Before it hands over the terminal, the panel asks the host that owns the session
+whether the resume can work there (`4top check`). A host without that agent
+installed, or a session whose directory is gone, is reported in the panel instead
+of failing during the hand-over, where the message would be painted over. The ssh
+connection also keeps a liveness probe, so a link that dies becomes an error rather
+than a hang, and the session stays in its transcript to be resumed again.
+
 ## Command line
 
 ```sh
@@ -130,12 +137,14 @@ different row schema is refused instead of partially parsed.
 4top search 'retry "database timeout"'    # metadata match
 4top search '中文' --full                  # decoded full-content search
 4top preview h_<key>                      # one bounded read-only page
+4top check h_<key> --json                 # would a resume work here, and why not
 4top new codex -- --model MODEL           # native arguments after --
 4top resume h_<key> --yes                 # restore this process as the agent
 4top doctor --json
 ```
 
-`--config`, `--host` and `--no-color` work before or after the subcommand. Keys
+`--config`, `--host` and `--no-color` work before or after the subcommand.
+`check` exits 0 when the session can resume here and 3 when it cannot. Keys
 may be shortened only when their prefixes are unambiguous (at least four
 characters). Row numbers are never execution targets. `list --json` rows carry
 `schema_version`, `key`, `agent`, `host`, `cwd`, `title`, `started`, `last`,

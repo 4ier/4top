@@ -6,6 +6,7 @@ import contextlib
 import os
 import subprocess
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -122,9 +123,11 @@ class DirectoryPrompt(ModalScreen[str | None]):
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, recorded: str, initial: str):
+    def __init__(self, recorded: str, initial: str, validate: bool = True):
+        # A remote directory cannot be checked from here: the remote CLI validates it
+        # when it runs, so an unvalidated prompt still cannot start anything wrong.
         super().__init__()
-        self.recorded, self.initial = recorded, initial
+        self.recorded, self.initial, self.validate = recorded, initial, validate
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -151,7 +154,10 @@ class DirectoryPrompt(ModalScreen[str | None]):
             return
         value = self.query_one("#cwd", Input).value.strip()
         candidate = Path(value).expanduser() if value else None
-        if candidate is None or not candidate.is_dir():
+        if candidate is None:
+            self.query_one("#form-error", Static).update("A directory is required.")
+            return
+        if self.validate and not candidate.is_dir():
             self.query_one("#form-error", Static).update("Not an existing directory.")
             return
         self.dismiss(str(candidate))
@@ -678,7 +684,7 @@ class FourtopApp(App[tuple | None]):
     def _detail_action(self, row, action):
         if action != "resume" or self.manager.demo:
             return
-        self._confirm_resume(row)
+        self.run_worker(self._prepare_resume(row))
 
     async def open_current(self):
         row = self.current()
@@ -687,26 +693,49 @@ class FourtopApp(App[tuple | None]):
         if self.manager.demo:
             self.action_preview()
         elif row.can_resume:
-            self._confirm_resume(row)
+            await self._prepare_resume(row)
         else:
             self.action_details()
+
+    async def _prepare_resume(self, row: Session):
+        """Ask the machine that owns the session whether a resume is possible there.
+
+        A refusal now is visible in the panel. The same refusal raised during the
+        terminal hand-over flashes past under a panel that repaints immediately
+        afterwards, which reads as "nothing happened".
+        """
+        if self._launching:
+            self.set_status("A launch is already in progress in this panel.")
+            return
+        self._launching = True
+        try:
+            report = await asyncio.to_thread(self.manager.check, row.key)
+        except (FourtopError, OSError, ValueError) as exc:
+            self.set_status(f"Cannot check {row.key}: {exc}")
+            return
+        finally:
+            self._launching = False
+        if report["resumable"] is None:
+            # An older remote cannot answer; say so and let the hand-over decide.
+            self.set_status(f"{report['reason']}; resuming without a preflight.")
+            self._confirm_resume(row)
+            return
+        if report["resumable"]:
+            self._confirm_resume(row)
+            return
+        if report.get("cwd_missing"):
+            self.push_screen(DirectoryPrompt(row.cwd, os.getcwd(), validate=not self.manager.remote),
+                             lambda answer: self.run_worker(self._resume(row, answer)) if answer else None)
+            return
+        self.set_status(f"{row.agent} on {self.manager.scope}: {report['reason']}")
 
     def _confirm_resume(self, row: Session, cwd: str | None = None):
         if self._launching:
             self.set_status("A launch is already in progress in this panel.")
             return
-        if not self.manager.remote and not self.manager.demo and cwd is None:
-            recorded = Path(row.cwd).expanduser() if row.cwd else None
-            if recorded is None or not recorded.is_dir():
-                # The dialog already says what will happen, so its button is the
-                # confirmation: asking twice for the same decision is noise.
-                self.push_screen(DirectoryPrompt(row.cwd, os.getcwd()),
-                                 lambda answer: self.run_worker(self._resume(row, answer))
-                                 if answer else None)
-                return
         if self.manager.remote:
             message = (f"This runs on {row.host} through ssh and creates a NEW {row.agent} process there.\n"
-                       f"Directory: {row.cwd}\nSession: {row.key}\n"
+                       f"Directory: {cwd or row.cwd}\nSession: {row.key}\n"
                        "The remote CLI uses its current native configuration.")
             self.push_screen(Confirm("Resume on " + row.host, message),
                              lambda answer: self.run_worker(self._resume(row)) if answer else None)
@@ -723,10 +752,11 @@ class FourtopApp(App[tuple | None]):
         self._launching = True
         try:
             if self.manager.remote:
-                command = self.manager.remote_argv(["resume", row.key, "--yes"])
+                remote = ["resume", row.key, "--yes"] + (["--cwd", cwd] if cwd else [])
+                command = self.manager.remote_argv(remote)
                 self._launching = False
                 self._hand_over(lambda: subprocess.call(command), f"Resuming on {row.host}…",
-                                f"Run `4top --host {row.host} resume {row.key}` instead.")
+                                f"Run `4top --host {row.host} resume {row.key}` instead.", remote=True)
                 return
             plan = await asyncio.to_thread(self.manager.resume, row.key, cwd)
         except (FourtopError, OSError, ValueError) as exc:
@@ -737,17 +767,31 @@ class FourtopApp(App[tuple | None]):
         self._hand_over(lambda: self.manager.run(plan), f"Resuming {plan.agent}…",
                         f"Run `4top resume {row.key}` instead.")
 
-    def _hand_over(self, action, message: str, fallback: str = ""):
+    def _hand_over(self, action, message: str, fallback: str = "", remote: bool = False):
         self.set_status(message)
         self._save_view()
+        started, code = time.monotonic(), None
         try:
             with self.suspend():
-                action()
+                code = action()
         except SuspendNotSupported:
             self.set_status(f"This terminal cannot hand over control. {fallback}".strip())
         except (FourtopError, OSError, ValueError) as exc:
             self.set_status(str(exc))
+        # A command that fails while the panel is suspended prints under a screen that
+        # is repainted immediately, so the failure has to be reported here or not at all.
+        if code and (remote or time.monotonic() - started < 2.0):
+            self.set_status(self._exit_note(int(code), remote))
         self.run_worker(self.refresh_rows())
+
+    @staticmethod
+    def _exit_note(code: int, remote: bool) -> str:
+        if remote and code == 255:
+            return ("ssh closed the connection (255). The session is unchanged in its transcript "
+                    "on that host: resume it again when the link is back.")
+        if remote:
+            return f"the remote command exited {code}; the session is unchanged in its transcript."
+        return f"the agent exited {code}."
 
     def action_help(self):
         self.push_screen(Confirm("4top keys & safety", "\n".join((

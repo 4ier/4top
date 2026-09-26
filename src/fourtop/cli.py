@@ -20,6 +20,7 @@ COMMANDS = (
     ("list", "List native sessions (JSON Lines with --json)"),
     ("search", "Search approved local history"),
     ("preview", "Print one bounded read-only transcript page"),
+    ("check", "Report whether one session can be resumed here"),
     ("new", "Start an original agent in this terminal"),
     ("resume", "Resume one exact session as a new process"),
     ("doctor", "Read dependency and source diagnostics"),
@@ -53,6 +54,9 @@ def parser() -> argparse.ArgumentParser:
         if command == "search":
             sub.add_argument("query")
             sub.add_argument("--full", action="store_true", help="Explicit decoded literal full-content search")
+        if command == "check":
+            sub.add_argument("key", help="Stable key / unique native ID prefix; never a row number")
+            sub.add_argument("--json", action="store_true")
         if command == "preview":
             sub.add_argument("key", help="Stable key; never a row number")
             sub.add_argument("--cursor", type=int, default=0, help="Byte offset returned by a previous page")
@@ -171,6 +175,16 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                 if cursor is not None:
                     print(f"\n--next-cursor {cursor}", file=sys.stderr)
             return 0
+        if command == "check":
+            report = manager.check(args.key)
+            if args.json:
+                print(json.dumps(report, ensure_ascii=False))
+            else:
+                state = "resumable" if report["resumable"] else "not resumable"
+                print(f"{report['agent']} · {report['key']} · {state}")
+                if not report["resumable"]:
+                    print(clean_text(report["reason"] or ""), file=sys.stderr)
+            return 0 if report["resumable"] else 3
         if command == "doctor":
             from .doctor import diagnose
             report = diagnose(manager)

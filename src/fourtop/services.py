@@ -9,6 +9,7 @@ import os
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 from session_ls.api import (
     HistoryIndex,
@@ -23,8 +24,8 @@ from session_ls.api import (
 
 from .agents import Drivers
 from .config import Config, Host
-from .errors import Conflict, Missing
-from .hosts import remote_preview, remote_search, remote_snapshot, ssh_argv
+from .errors import Conflict, FourtopError, Missing
+from .hosts import remote_check, remote_preview, remote_search, remote_snapshot, ssh_argv
 from .models import LaunchPlan, Session, Snapshot
 from .state import StateStore
 
@@ -144,6 +145,38 @@ class Manager:
             body += "\n\n" + "\n".join(page.issues)
         return page.label, body, page.next_cursor
 
+    def check(self, query: str) -> dict:
+        """Would a resume work, and if not, why? Read-only: no process is planned.
+
+        This exists so a refusal can be shown before the terminal is handed over.
+        The same refusal raised during the hand-over flashes past under a panel that
+        repaints immediately afterwards, which reads as "nothing happened".
+        """
+        if self.host is not None:
+            return remote_check(self.config, self.host, query)
+        record = self.resolve_history(query)
+        executable, reason = None, None
+        if record.agent == "cursor":
+            reason = "cursor transcripts are read-only"
+        elif not record.can_resume:
+            reason = (f"the recorded directory is inferred or missing: {record.cwd or 'unknown'}"
+                      if record.cwd_quality != "native" else
+                      "no exact native identifier; 4top will not guess the latest session")
+        else:
+            try:
+                executable = self.drivers.executable(record.agent)
+            except FourtopError as exc:
+                reason = str(exc)
+        directory = Path(record.cwd).expanduser() if record.cwd else None
+        cwd_missing = directory is None or not directory.is_dir()
+        if reason is None and cwd_missing:
+            reason = f"the recorded directory does not exist: {record.cwd or 'unknown'}"
+        return {"key": record.key, "agent": record.agent, "host": self.scope,
+                "native_id": record.native_id, "cwd": record.cwd,
+                "cwd_quality": record.cwd_quality, "executable": executable,
+                "cwd_missing": cwd_missing, "resumable": reason is None, "reason": reason,
+                "status": record.status, "problems": list(record.problems)}
+
     def new(self, agent: str, cwd: str, extra: tuple[str, ...] = ()) -> LaunchPlan:
         if self.host is not None:
             raise Missing("Starting an agent on another host runs there; see remote_argv")
@@ -216,6 +249,14 @@ class DemoManager:
 
     def resolve_row(self, query: str):
         return unique(self.rows, query, lambda row: (row.key,))
+
+    def check(self, query: str):
+        row = self.resolve_row(query)
+        return {"key": row.key, "agent": row.agent, "host": "demo", "native_id": None,
+                "cwd": row.cwd, "cwd_quality": "native", "executable": None,
+                "cwd_missing": False, "resumable": row.can_resume,
+                "reason": None if row.can_resume else "DEMO is read-only",
+                "status": row.status, "problems": []}
 
     def preview(self, row, cursor=0):
         return "DEMO — synthetic terminal preview", (

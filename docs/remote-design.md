@@ -61,6 +61,21 @@ line.
 The saved selection is local-only, because a history key from another machine
 means nothing here.
 
+## Preflight and flaky links
+
+An action preflights on the host that owns the session (`4top check KEY`). The panel
+runs it before taking over the terminal, because a refusal raised *during* the
+hand-over prints under a screen that is repainted immediately: it reads as "nothing
+happened". The preflight answers three things: is there an exact native identifier,
+is the recorded directory still there, and is that agent installed on that host.
+
+The interactive connection carries `ServerAliveInterval`/`ServerAliveCountMax` and
+`TCPKeepAlive`, so a dead link becomes an error in about 45 seconds instead of a
+hang, and it reuses the warm `ControlMaster` connection so the hand-over does not
+pay a fresh handshake. If the link does drop, the remote process may be gone but the
+transcript is not: the panel says so and the session can be resumed again. Keeping an
+agent alive across a drop is the remote machine's own multiplexer, not 4top's.
+
 ## Actions
 
 `resume` and `new` with `--host` hand the terminal to `ssh -t`, so the process is
