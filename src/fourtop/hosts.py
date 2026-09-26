@@ -6,8 +6,10 @@ existing CLI, so anything this module can do is something a person could type.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 import subprocess
+from pathlib import Path
 
 from session_ls.api import clean_text
 from session_ls.storage import private_dir
@@ -24,11 +26,35 @@ SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "Control
                "-o", "TCPKeepAlive=yes")
 
 
+# Unix sockets have a hard path limit (104 bytes on macOS). A deep HOME can exceed
+# it: Termux on Android runs under /data/data/com.termux/files/home, which pushed the
+# connection socket over the limit and made every remote call fail with
+# "unix_listener: path ... too long for Unix domain socket".
+CONTROL_PATH_LIMIT = 100
+
+
+def control_dir(config: Config) -> str:
+    """The shortest private directory that can hold a connection socket.
+
+    ``%C`` expands to a 40-character hash, so the directory plus the name has to fit.
+    The state directory is tried first, then the temporary directory, then ``/tmp``.
+    """
+    uid = os.getuid()
+    temporary = config.environment.get("TMPDIR") or "/tmp"
+    for candidate in (config.state_dir / "ssh",
+                      Path(temporary) / f"4top-{uid}",
+                      Path("/tmp") / f"4top-{uid}"):
+        if len(str(candidate)) + 1 + 40 <= CONTROL_PATH_LIMIT:
+            return str(private_dir(candidate))
+    raise Unavailable("No path is short enough for the ssh connection socket; "
+                      "set TMPDIR to something short")
+
+
 def ssh_argv(config: Config, host: Host, args: list[str], *, tty: bool = False) -> list[str]:
     """Build one local argv. ssh hands the last element to a remote shell, so every
     remote argument is quoted for that shell rather than trusted as a literal."""
     options = [*SSH_OPTIONS, "-o", f"ConnectTimeout={max(1, int(host.timeout_seconds))}",
-               "-o", f"ControlPath={private_dir(config.state_dir / 'ssh')}/%C"]
+               "-o", f"ControlPath={control_dir(config)}/%C"]
     if tty:
         options.append("-t")
     remote = " ".join(shlex.quote(value) for value in (host.command, *args))

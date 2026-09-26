@@ -4,7 +4,7 @@
 PyPI versions are immutable: a published wheel can be yanked but never replaced, so
 every check here exists to stop a publish that cannot be taken back.
 
-    scripts/check_release.py v0.2.0a1             # tag and built artifacts
+    scripts/check_release.py v0.2.0a2             # tag and built artifacts
     scripts/check_release.py v0.2.0a1 --decide    # also ask PyPI what is new
 
 `session-ls` is not built here: it has its own repository and its own pipeline, and

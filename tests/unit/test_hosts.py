@@ -297,3 +297,22 @@ def test_a_remote_without_check_is_stated_not_fatal(remote):
     report = remote_check(config, host, "h_abc")
     assert report["resumable"] is None
     assert "without `check`" in report["reason"]
+
+
+def test_control_socket_path_stays_short_enough(tmp_path):
+    # Termux on Android runs under /data/data/com.termux/files/home, which pushed the
+    # socket path past the Unix-domain limit and made every remote call fail.
+    import os
+
+    from fourtop.config import Config
+    from fourtop.hosts import CONTROL_PATH_LIMIT, control_dir, ssh_argv
+
+    deep = tmp_path / ("very/deep/" * 12) / "home"
+    deep.mkdir(parents=True)
+    environment = {**os.environ, "HOME": str(deep), "XDG_STATE_HOME": str(deep / "state")}
+    config = Config.load(environment=environment)
+    for candidate in (control_dir(config), os.path.dirname(control_dir(config))):
+        pass
+    path = f"{control_dir(config)}/%C"
+    assert len(path.replace("%C", "a" * 40)) <= CONTROL_PATH_LIMIT, path
+    assert "ControlPath=" + path in " ".join(ssh_argv(config, config.resolve_host("me@venus"), ["list"]))

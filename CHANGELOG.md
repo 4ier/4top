@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Put the ssh connection socket somewhere short enough. Unix sockets have a hard
+  path limit, and Termux on Android runs under
+  `/data/data/com.termux/files/home`, so the connection path overflowed and every
+  remote host failed with `unix_listener: path ... too long for Unix domain socket`.
+  The socket now prefers the state directory, then the temporary directory, then
+  `/tmp`.
+
+## 4top 0.2.0a2 — 2026-09-26
+
+Fix the remote-host path on Android/Termux, which made every host unusable there.
+
 - `session-ls` moved to its own repository
   ([4ier/session-ls](https://github.com/4ier/session-ls)), which is now the home of
   the parser package and the owner of its releases. This repository consumes it as
