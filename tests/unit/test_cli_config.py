@@ -240,3 +240,22 @@ def test_the_remote_update_helper_is_importable_and_documented():
     spec.loader.exec_module(module)
     assert module.CANDIDATE_PORTS and all(port > 1024 for port in module.CANDIDATE_PORTS)
     assert module.mac_proxy_port()
+
+
+def test_check_reports_why_an_installed_cli_cannot_run(lab, tmp_path):
+    # The confusing case: the path resolves, so a naive preflight passes, but the CLI
+    # cannot actually run here -- "env: node: No such file or directory" over ssh.
+    native = "44444444-5555-6666-7777-888888888888"
+    write_pi_session(lab, str(lab.path), native)
+    broken = tmp_path / "broken-pi"
+    broken.write_text("#!/bin/sh\necho 'env: node: No such file or directory' >&2\nexit 127\n")
+    broken.chmod(0o755)
+    config = lab.write_config(f'[agents.pi]\nexecutable = "{broken}"\n')
+    manager = Manager(config)
+    try:
+        report = manager.check(native)
+    finally:
+        manager.close()
+    assert report["resumable"] is False
+    assert "does not advertise a resume interface" in report["reason"]
+    assert "env: node: No such file or directory" in report["reason"], report["reason"]

@@ -1,6 +1,6 @@
 # Compatibility and evidence
 
-**Status: 0.2.0a3 alpha.** Implementation, automated tests and real native CLI
+**Status: 0.2.0a4 alpha.** Implementation, automated tests and real native CLI
 checks are different evidence. The [Mac acceptance record](validation/macos-0.1.0a2.md)
 contains the actual results and their limits. It was written before the current
 release line, so only its parsing, installation and native-resume findings apply.

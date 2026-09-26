@@ -165,6 +165,13 @@ class Manager:
         else:
             try:
                 executable = self.drivers.executable(record.agent)
+                # Resolving a path is not enough: the CLI has to actually run here. A
+                # non-interactive ssh session, for instance, gives the remote 4top a
+                # minimal PATH, and a launcher that needs node then fails at --help.
+                capability = self.drivers.probe(record.agent)
+                if not capability.resume:
+                    reason = (f"{record.agent} at {executable} does not advertise a resume "
+                              f"interface" + (f" ({capability.detail})" if capability.detail else ""))
             except FourtopError as exc:
                 reason = str(exc)
         directory = Path(record.cwd).expanduser() if record.cwd else None

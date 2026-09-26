@@ -10,6 +10,14 @@ Get the ssh connection socket length right, measured rather than assumed.
   is the fallback, and if neither fits, ssh runs without connection reuse instead of
   failing every host.
 
+## 4top 0.2.0a4 — 2026-09-26
+
+- `4top check` now proves the agent can actually run here, not just that a path is
+  configured. It runs the same `--help` probe a resume would, and reports why the CLI
+  failed: the case that prompted this was a Mac whose `pi` and `codex` launchers need
+  `node` on `PATH`, which a non-interactive ssh session does not have, so the panel's
+  preflight passed and the resume then exited 5 with no explanation.
+
 ## Unreleased
 
 - Document that an agent installed on a host can still be "not found" when that host's

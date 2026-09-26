@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "4top"
-version = "0.2.0a3"
+version = "0.2.0a4"
 description = "Your coding agents, one terminal. Find, search and resume native sessions, locally or over SSH."
 readme = "README.md"
 requires-python = ">=3.11"

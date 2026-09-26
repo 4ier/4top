@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from session_ls.api import HistoryRecord, history_key, is_uuid, open_source
+from session_ls.api import HistoryRecord, clean_text, history_key, is_uuid, open_source
 
 from .config import Config
 from .errors import Dependency, FourtopError, Missing
@@ -33,6 +33,7 @@ class Capability:
     allocate_id: bool
     resume: bool
     version: str
+    detail: str = ""
 
 
 def validate_extra(agent: str, extra: tuple[str, ...]) -> None:
@@ -76,21 +77,32 @@ class Drivers:
         key = (executable, st.st_mtime_ns, st.st_size)
         if key in self._probes:
             return self._probes[key]
+        detail = ""
         try:
             result = subprocess.run([executable, "--help"], capture_output=True, text=True,
                                     errors="replace", timeout=PROBE_SECONDS,
                                     env=self.config.environment, cwd="/")
             help_text = result.stdout + result.stderr
             ok = result.returncode == 0
+            if not ok:
+                # Keep the first line of the failure: "env: node: No such file or
+                # directory" is the difference between "not installed" and "installed
+                # but unusable here", which is the confusing case.
+                first = next((line.strip() for line in (result.stderr + result.stdout).splitlines()
+                              if line.strip()), "")
+                detail = (f"rc={result.returncode}" + (f", {clean_text(first)}" if first else ""))[:160]
             version_result = subprocess.run([executable, "--version"], capture_output=True, text=True,
                                             errors="replace", timeout=PROBE_SECONDS,
                                             env=self.config.environment, cwd="/")
             version = version_result.stdout.strip()[:160] if version_result.returncode == 0 else "unknown"
-        except (OSError, subprocess.TimeoutExpired):
+        except (OSError, subprocess.TimeoutExpired) as exc:
             ok, help_text, version = False, "", "unavailable"
+            detail = f"{type(exc).__name__}"
+        if not isinstance(detail, str):
+            detail = ""
         resume_token = "resume" if agent == "codex" else "--resume" if agent == "claude" else "--session"
         value = Capability(executable, ok, ok and agent != "codex" and "--session-id" in help_text,
-                           ok and resume_token in help_text, version)
+                           ok and resume_token in help_text, clean_text(version), detail)
         self._probes[key] = value
         return value
 
