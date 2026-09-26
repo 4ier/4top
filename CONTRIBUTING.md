@@ -75,9 +75,18 @@ have produced a package nobody could install. A version already on PyPI is skipp
 rather than treated as an error, so re-running a release is safe;
 `python scripts/check_release.py --decide` says what would be uploaded.
 
-Uploads use PyPI trusted publishing, so no token is stored here. Configure a
-publisher on PyPI for the projects `4top` and `session-ls`, pointing at owner
-`4ier`, repository `4top`, workflow `publish.yml` and environment `pypi`. The
+Uploads use PyPI trusted publishing, so no token is stored here. Configure one
+publisher per project on PyPI, pointing at owner `4ier`, repository `4top` and
+workflow `publish.yml`, with these environment names:
+
+| Project | Environment |
+| --- | --- |
+| `session-ls` | `pypi-session-ls` |
+| `4top` | `pypi-4top` |
+
+The environment distinguishes two otherwise identical publishers, and each project
+publishes from its own job: one job means one OIDC exchange, so a second project
+would upload with the first project's token and be refused. The
 manual trigger of that workflow defaults to a dry run, which rehearses the whole
 path without uploading.
 

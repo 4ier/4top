@@ -110,16 +110,18 @@ def decide() -> int:
     """Report what a publish would upload, so CI can skip versions that exist.
 
     PyPI refuses an existing version, and refusing mid-run is worse than deciding
-    here where the reason can be printed.
+    here, where the reason can be printed. stdout is exactly `key=value` lines so it
+    can be appended to $GITHUB_OUTPUT; the explanation goes to stderr.
     """
     root = project(ROOT / "pyproject.toml")
     library = project(LIBRARY_PYPROJECT)
-    for package, info in ((LIBRARY_PACKAGE, library), (ROOT_PACKAGE, root)):
+    for key, package, info in (("session_ls", LIBRARY_PACKAGE, library),
+                               ("root", ROOT_PACKAGE, root)):
         exists = published(package, info["version"])
-        key = package.replace("-", "_")
         print(f"{key}={'exists' if exists else 'new'}")
-        print(f"  {package} {info['version']}: "
-              f"{'already on PyPI, will be skipped' if exists else 'will be uploaded'}")
+        print(f"{package} {info['version']}: "
+              f"{'already on PyPI, will be skipped' if exists else 'will be uploaded'}",
+              file=sys.stderr)
     return 0
 
 

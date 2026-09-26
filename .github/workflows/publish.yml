@@ -5,8 +5,12 @@ name: publish
 # session-ls before 4top (the root requires it) and opens the GitHub release.
 #
 # Both uploads use PyPI trusted publishing: no token is stored in this repository.
-# Configure a publisher on PyPI for the projects `4top` and `session-ls`, pointing at
-# owner 4ier, repository 4top, workflow publish.yml and environment pypi.
+# Configure one publisher per project on PyPI, pointing at owner 4ier, repository
+# 4top and workflow publish.yml, with these environment names:
+#   session-ls -> pypi-session-ls
+#   4top       -> pypi-4top
+# The environment is what distinguishes two otherwise identical publishers, and each
+# project publishes from its own job so the OIDC exchange mints the right token.
 #
 # The manual trigger defaults to a dry run so the same path can be rehearsed.
 on:
@@ -33,6 +37,9 @@ jobs:
   verify:
     needs: test
     runs-on: ubuntu-24.04
+    outputs:
+      session_ls: ${{ steps.decide.outputs.session_ls }}
+      root: ${{ steps.decide.outputs.root }}
     steps:
       - uses: actions/checkout@v4
         with: {persist-credentials: false}
@@ -59,12 +66,17 @@ jobs:
       - name: Install both wheels into a fresh environment
         run: python scripts/verify_install.py dist
       - name: Split the uploads, session-ls first
-        id: split
         run: |
           mkdir -p upload-session-ls upload-root
           mv dist/*session_ls* upload-session-ls/ || true
           mv dist/* upload-root/ || true
           ls -l upload-session-ls upload-root
+      - name: Decide what is new, so an existing version is skipped
+        id: decide
+        run: |
+          tag=""
+          if [ "${{ github.event_name }}" = "push" ]; then tag="$GITHUB_REF_NAME"; fi
+          python scripts/check_release.py $tag --dist dist --decide >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@v4
         with:
           name: distributions
@@ -72,31 +84,53 @@ jobs:
             upload-session-ls/*
             upload-root/*
 
-  publish:
+  # One job per project: the OIDC exchange mints a token for the project its
+  # publisher matches, so two projects in one job would reuse one project's token.
+  # The environment is what tells two otherwise identical publishers apart.
+  publish-session-ls:
     needs: verify
-    if: github.event_name == 'push' || inputs.dry_run == false
+    if: needs.verify.outputs.session_ls == 'new' && (github.event_name == 'push' || inputs.dry_run == false)
     runs-on: ubuntu-24.04
-    environment: pypi
+    environment: pypi-session-ls
     permissions:
       id-token: write
     steps:
       - uses: actions/download-artifact@v4
         with: {name: distributions}
-      - name: Publish session-ls first
+      - name: Publish session-ls
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: ./upload-session-ls
           print-hash: true
-      - name: Then publish 4top, which requires it
+
+  publish-root:
+    needs: [verify, publish-session-ls]
+    # `!cancelled()` because a skipped dependency (the version already exists) must
+    # not take this job down with it.
+    if: |
+      !cancelled() && needs.verify.outputs.root == 'new' &&
+      (needs.publish-session-ls.result == 'success' || needs.publish-session-ls.result == 'skipped') &&
+      (github.event_name == 'push' || inputs.dry_run == false)
+    runs-on: ubuntu-24.04
+    environment: pypi-4top
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: distributions}
+      - name: Publish 4top, which requires session-ls
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: ./upload-root
           print-hash: true
 
   release:
-    needs: publish
+    needs: [publish-session-ls, publish-root]
     # Only a tag is a release; the manual trigger rehearses the build and the gate.
-    if: github.event_name == 'push'
+    if: |
+      !cancelled() && github.event_name == 'push' &&
+      (needs.publish-session-ls.result == 'success' || needs.publish-session-ls.result == 'skipped') &&
+      (needs.publish-root.result == 'success' || needs.publish-root.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -107,4 +141,9 @@ jobs:
         with: {name: distributions}
       - env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes upload-*/*
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "release $GITHUB_REF_NAME already exists; leaving it alone"
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes upload-*/*
+          fi

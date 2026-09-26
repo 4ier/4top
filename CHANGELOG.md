@@ -51,6 +51,10 @@ terminal multiplexer of its own.
 
 ### Releases
 
+- Publish each project from its own job, with its own PyPI environment. One job
+  means one OIDC exchange, and a token minted for `session-ls` is refused for
+  `4top`; the first publish attempt failed exactly that way after `session-ls 0.2.0`
+  had already been accepted.
 - Publish from CI on a `v<version>` tag: the suite runs, `scripts/check_release.py`
   gates the release, both wheels are built and installed into a fresh environment,
   `session-ls` is published before `4top`, and the GitHub release is opened. Uploads
