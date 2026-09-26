@@ -81,6 +81,8 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
       - uses: actions/download-artifact@v4
         with:
           name: distributions
@@ -90,6 +92,8 @@ jobs:
         with:
           packages-dir: ./dist
           print-hash: true
+          # A re-run of a release must not fail on its own upload.
+          skip-existing: true
 
       - name: Wait until PyPI serves the new version
         # A freshly uploaded version is not visible on every CDN edge at once, so
