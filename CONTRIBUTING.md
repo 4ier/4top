@@ -9,7 +9,7 @@ process supervisors or automatic privilege bypasses are outside this release.
 
 ```sh
 python3 -m venv .venv
-.venv/bin/python -m pip install -e ./packages/session-ls -e '.[dev]'
+.venv/bin/python -m pip install -e '.[dev]'   # session-ls comes from PyPI
 .venv/bin/python -m pytest
 .venv/bin/python -m ruff check .
 git config core.hooksPath .githooks   # once per clone: run the gates before commit
@@ -61,8 +61,10 @@ DEMO. It is not a real-CLI demonstration or a performance benchmark.
 Publishing is a tag; CI does the rest. PyPI versions are immutable, so a gate runs
 before anything is uploaded.
 
-1. Set the version in `pyproject.toml`, and in `packages/session-ls/pyproject.toml`
-   when the parser changed, and update the changelog.
+1. Set the version in `pyproject.toml` and update the changelog. Changes to
+   `session-ls` are released from
+   [its own repository](https://github.com/4ier/session-ls), which this project then
+   picks up as a dependency.
 2. Check locally: `python scripts/check_release.py v<version>`.
 3. Tag and push: `git tag v<version> && git push origin v<version>`.
 4. CI runs the suite, gates the release, builds both wheels, installs them into a

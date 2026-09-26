@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `session-ls` moved to its own repository
+  ([4ier/session-ls](https://github.com/4ier/session-ls)), which is now the home of
+  the parser package and the owner of its releases. This repository consumes it as
+  an ordinary PyPI dependency, so its CI no longer builds or publishes a second
+  project, and its release gate asks PyPI whether the required version exists
+  instead of assuming a local package.
+
 ## 4top 0.2.0a1 — 2026-09-26
 
 Published to PyPI from tag `v0.2.0a1`, together with `session-ls 0.2.0` as its

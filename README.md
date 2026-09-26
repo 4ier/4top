@@ -45,9 +45,10 @@ python3 -m venv .venv
 .venv/bin/4top --demo
 ```
 
-Both local packages are supplied to pip here so the checkout is self-contained
-while `session-ls` is being changed alongside it. The root wheel contains only
-`fourtop`; the independent `session-ls` package retains its small, stdlib-only CLI.
+`session-ls`, the parser this builds on, is a separate project with its own
+repository and pipeline ([4ier/session-ls](https://github.com/4ier/session-ls)); a
+checkout installs it from PyPI like any other dependency. The root wheel contains
+only `fourtop`, and `session-ls` keeps its small, stdlib-only CLI.
 
 ```sh
 . .venv/bin/activate

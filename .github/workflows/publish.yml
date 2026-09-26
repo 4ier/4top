@@ -5,10 +5,8 @@ name: publish
 # 4top and opens the GitHub release.
 #
 # This repository publishes one project. `session-ls` has its own repository and its
-# own pipeline, and is consumed here as an ordinary PyPI dependency, which is why
-# this workflow has no cross-project ordering, no second upload and no second
-# publisher to disambiguate. The build still produces both wheels from this checkout
-# while the two packages share a tree, but only the root is uploaded.
+# own pipeline and is consumed here as an ordinary PyPI dependency, so there is no
+# cross-project ordering, no second upload and no second publisher to disambiguate.
 #
 # The upload uses PyPI trusted publishing: no token is stored in this repository.
 # It needs one publisher on PyPI for project `4top`, pointing at owner 4ier,
@@ -40,7 +38,6 @@ jobs:
     needs: test
     runs-on: ubuntu-24.04
     outputs:
-      session_ls: ${{ steps.decide.outputs.session_ls }}
       root: ${{ steps.decide.outputs.root }}
     steps:
       - uses: actions/checkout@v4
@@ -56,16 +53,14 @@ jobs:
           tag=""
           if [ "${{ github.event_name }}" = "push" ]; then tag="$GITHUB_REF_NAME"; fi
           python scripts/check_release.py $tag
-      - name: Build both distributions
-        run: |
-          python -m build --no-isolation packages/session-ls --outdir dist
-          python -m build --no-isolation --outdir dist
+      - name: Build the distribution
+        run: python -m build --no-isolation --outdir dist
       - name: The artifacts are the versions we validate
         run: |
           tag=""
           if [ "${{ github.event_name }}" = "push" ]; then tag="$GITHUB_REF_NAME"; fi
           python scripts/check_release.py $tag --dist dist
-      - name: Install both wheels into a fresh environment
+      - name: Install the wheel into a fresh environment
         run: python scripts/verify_install.py dist
       - name: Decide what is new, so an existing version is skipped
         id: decide
@@ -73,15 +68,10 @@ jobs:
           tag=""
           if [ "${{ github.event_name }}" = "push" ]; then tag="$GITHUB_REF_NAME"; fi
           python scripts/check_release.py $tag --dist dist --decide >> "$GITHUB_OUTPUT"
-      - name: Keep only this repository's own project for upload
-        run: |
-          mkdir -p upload
-          mv dist/4top-* upload/
-          ls -l upload
       - uses: actions/upload-artifact@v4
         with:
           name: distributions
-          path: upload/*
+          path: dist/*
 
   publish:
     needs: verify
@@ -94,11 +84,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: distributions
-          path: upload
+          path: dist
       - name: Publish 4top
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          packages-dir: ./upload
+          packages-dir: ./dist
           print-hash: true
 
   release:
@@ -124,5 +114,5 @@ jobs:
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             echo "release $GITHUB_REF_NAME already exists; leaving it alone"
           else
-            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes upload/*
+            gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes dist/*
           fi

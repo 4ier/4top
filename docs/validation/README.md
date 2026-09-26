@@ -18,7 +18,6 @@ then run:
 
 ```sh
 python scripts/acceptance.py --output acceptance-output
-python -m build --no-isolation packages/session-ls --outdir dist
 python -m build --no-isolation --outdir dist
 python scripts/verify_install.py dist
 ```

@@ -34,22 +34,17 @@ dev = ["pytest>=8,<10", "pytest-asyncio>=0.23,<2", "pexpect>=4.9,<5", "ruff>=0.1
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "packages/session-ls/tests"]
-pythonpath = ["src", "packages/session-ls/src"]
+testpaths = ["tests"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-exclude = ["packages/session-ls/src/session_ls/__init__.py", "packages/session-ls/tests/test_cli.py", "packages/session-ls/tests/test_session_ls.py"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I"]
 
-[tool.uv.workspace]
-members = ["packages/session-ls"]
-
-# session-ls is not published. It resolves from this checkout as a workspace member,
-# which is what lets `uv sync` and an editable tool install work without a registry.
-[tool.uv.sources]
-session-ls = { workspace = true }
+# session-ls is an ordinary dependency. It has its own repository
+# (https://github.com/4ier/session-ls) and its own pipeline, and is consumed from
+# PyPI here, which is why this project has no workspace or source override.

@@ -22,8 +22,11 @@ def run(argv, env, cwd):
 def main():
     directory = Path(sys.argv[1] if len(sys.argv) > 1 else "dist").resolve()
     wheels = sorted(directory.glob("*.whl"))
-    if len(wheels) != 2:
-        raise SystemExit("Expected exactly two freshly built wheels (4top and session-ls)")
+    if [wheel.name for wheel in wheels if wheel.name.startswith("4top-")] == []:
+        raise SystemExit("Expected a freshly built 4top wheel")
+    wheels = [wheel for wheel in wheels if wheel.name.startswith("4top-")]
+    if len(wheels) != 1:
+        raise SystemExit(f"Expected exactly one 4top wheel, found {[w.name for w in wheels]}")
     with zipfile.ZipFile(next(p for p in wheels if p.name.startswith("4top-"))) as archive:
         if any(name.startswith("session_ls/") for name in archive.namelist()):
             raise SystemExit("4top must not vendor or overwrite the separate session-ls package")
@@ -46,6 +49,8 @@ def main():
         rows = [json.loads(line) for line in demo.splitlines()]
         assert len(rows) == 6 and all(row["schema_version"] == 2 for row in rows)
         assert not (home / "state").exists(), "Demo wrote user state"
+        # session-ls is a dependency now, resolved from PyPI rather than built here:
+        # its own console script existing proves the dependency was installed.
         legacy = run([str(target / "bin/session-ls"), "--json"], env, root)
         assert not legacy.strip(), "Isolated empty HOME must not discover caller history"
         no_ui = run([python, "-c", "import sys, session_ls; assert 'textual' not in sys.modules"], env, root)

@@ -1,5 +1,6 @@
 """The release gate: PyPI versions are immutable, so this is the last chance to say no."""
 import importlib.util
+import tomllib
 from pathlib import Path
 
 from packaging.specifiers import SpecifierSet
@@ -14,36 +15,52 @@ def load():
     return module
 
 
-def test_the_current_tree_passes_its_own_gate():
-    problems, versions = load().check("v0.2.0a1", None)
+def current_version() -> str:
+    with (ROOT / "pyproject.toml").open("rb") as handle:
+        return tomllib.load(handle)["project"]["version"]
+
+
+def test_the_current_tree_passes_the_checks_that_need_no_network():
+    # The tag is derived from the version so bumping the version does not break this.
+    problems, info = load().check("v" + current_version(), None)
     assert problems == [], problems
-    assert str(versions["library"]) in versions["requirement"]
+    assert str(info["version"]) == current_version()
 
 
 def test_a_tag_that_does_not_match_the_version_is_refused():
-    problems, _ = load().check("v0.1.0", None)
+    problems, _ = load().check("v0.0.0", None)
     assert any("does not match" in problem for problem in problems), problems
-
-
-def test_a_requirement_the_library_cannot_satisfy_is_refused(monkeypatch):
-    # The real trap: the root required session-ls>=0.2.0 while PyPI only held 0.1.0,
-    # so the root wheel would have been installable by nobody.
-    module = load()
-    monkeypatch.setattr(module, "library_requirement", lambda root: SpecifierSet(">=0.3"))
-    problems, _ = module.check("v0.2.0a1", None)
-    assert any("not installable" in problem for problem in problems), problems
 
 
 def test_artifacts_must_be_the_versions_being_released(tmp_path):
     module = load()
-    (tmp_path / "4top-0.2.0a1-py3-none-any.whl").write_text("")
-    (tmp_path / "session_ls-0.2.0-py3-none-any.whl").write_text("")
-    (tmp_path / "session_ls-0.2.0.tar.gz").write_text("")
-    assert module.artifact_versions(tmp_path) == {("4top", "0.2.0a1"), ("session-ls", "0.2.0")}
-    problems, _ = module.check("v0.2.0a1", tmp_path)
+    version = current_version()
+    (tmp_path / f"4top-{version}-py3-none-any.whl").write_text("")
+    (tmp_path / f"4top-{version}.tar.gz").write_text("")
+    problems, _ = module.check("v" + version, tmp_path)
     assert problems == [], problems
 
-    for leftover in tmp_path.glob("session_ls-*"):
-        leftover.unlink()
-    problems, _ = module.check("v0.2.0a1", tmp_path)
+    for built in tmp_path.glob("*"):
+        built.unlink()
+    problems, _ = module.check("v" + version, tmp_path)
     assert any("expected" in problem for problem in problems), problems
+
+
+def test_an_unsatisfiable_dependency_is_refused(monkeypatch):
+    # The real trap: the root required session-ls>=0.2.0 while PyPI only held 0.1.0,
+    # so the published wheel would have been installable by nobody. session-ls is not
+    # built here any more, so this is asked of PyPI rather than of a local package.
+    module = load()
+    monkeypatch.setattr(module, "published_versions", lambda name: {"0.1.0"})
+    problem = module.dependency_problem(SpecifierSet(">=0.2.0,<0.3"))
+    assert problem and "uninstallable" in problem
+
+    monkeypatch.setattr(module, "published_versions", lambda name: {"0.2.0", "0.2.1"})
+    assert module.dependency_problem(SpecifierSet(">=0.2.0,<0.3")) is None
+
+
+def test_decide_refuses_before_it_reports(monkeypatch, capsys):
+    module = load()
+    monkeypatch.setattr(module, "published_versions", lambda name: set())
+    assert module.decide() == 1
+    assert "uninstallable" in capsys.readouterr().err
