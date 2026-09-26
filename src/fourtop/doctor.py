@@ -78,7 +78,7 @@ def diagnose(manager) -> dict:
         if local and remote and local != remote:
             report["issues"].append(
                 f"{manager.host.name} runs {remote} while this build is {local}: "
-                f"update it with scripts/remote-update.sh {manager.host.name}")
+                f"update it with scripts/remote_update.py {manager.host.name}")
     report["state"] = {"mode": oct(stat.S_IMODE(config.state_dir.stat().st_mode)),
                        "writable": os.access(config.state_dir, os.W_OK)}
     report["budgets"] = {"metadata_max_bytes": config.metadata_max_bytes,

@@ -213,3 +213,19 @@ def test_revision_is_known_or_honestly_unknown(tmp_path, monkeypatch):
     expected = _subprocess.run(["git", "-C", str(SRC.parent), "rev-parse", "--short", "HEAD"],
                                capture_output=True, text=True).stdout.strip()
     assert doctor.revision() == expected
+
+
+def test_a_revision_mismatch_between_machines_is_reported(lab, monkeypatch):
+    from fourtop import doctor, hosts
+
+    # doctor imports it lazily, so the module it comes from is the patch target.
+    monkeypatch.setattr(hosts, "remote_doctor",
+                        lambda config, host: {"revision": "0000000", "issues": []})
+    config = lab.write_config('[hosts.venus]\nssh = "me@venus"\n')
+    manager = Manager(config, config.resolve_host("venus"))
+    try:
+        report = doctor.diagnose(manager)
+    finally:
+        manager.close()
+    assert report["revision"], "this checkout reports its own revision"
+    assert any("scripts/remote_update.py venus" in issue for issue in report["issues"]), report["issues"]
