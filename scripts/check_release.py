@@ -4,8 +4,8 @@
 PyPI versions are immutable: a published wheel can be yanked but never replaced, so
 every check here exists to stop a publish that cannot be taken back.
 
-    scripts/check_release.py v0.1.0a2             # tag, versions and built artifacts
-    scripts/check_release.py v0.1.0a2 --decide    # also report what is new on PyPI
+    scripts/check_release.py v0.2.0a1             # tag, versions and built artifacts
+    scripts/check_release.py v0.2.0a1 --decide    # also report what is new on PyPI
 
 The dependency check is the one that matters most. The root wheel requires
 `session-ls>=0.2.0`, and PyPI only ever held 0.1.0, so publishing the root alone
@@ -125,7 +125,7 @@ def decide() -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("tag", nargs="?", help="Git tag being released, e.g. v0.1.0a2")
+    parser.add_argument("tag", nargs="?", help="Git tag being released, e.g. v0.2.0a1")
     parser.add_argument("--dist", type=Path, help="Directory holding the built artifacts")
     parser.add_argument("--decide", action="store_true", help="Print what would be uploaded")
     args = parser.parse_args()

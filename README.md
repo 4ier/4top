@@ -10,7 +10,7 @@ daemon, account, model calls, or telemetry.
 
 ![4top synthetic demo — no real user history](docs/demo/demo.svg)
 
-> **0.1.0a2 — alpha.** The current development line owns no process and drives no
+> **0.2.0a1 — alpha.** The current development line owns no process and drives no
 > multiplexer of its own. Codex **0.155.1** passed an authenticated exact-resume
 > smoke check against an earlier build;
 > Claude Code, Pi and other native versions are not certified.
