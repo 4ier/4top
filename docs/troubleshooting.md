@@ -16,6 +16,7 @@ directory is a hard error; 4top will not reset identity behind your back.
 | Remote runs older code | `4top --host NAME doctor` prints both revisions and reports a mismatch. Update with `scripts/remote_update.py NAME`. |
 | Remote has no working egress | Its own proxy may be down. `scripts/remote_update.py NAME` tunnels this machine's working egress to it for the update. |
 | Remote agent missing | The host that owns the session must have that agent installed. `4top --host NAME check KEY` says so before the panel hands the terminal over. |
+| Remote agent "not found" although it is installed | A non-interactive ssh session gets a minimal `PATH` (on macOS `~/.local/bin:/usr/bin:/bin:...`), so the host's own agents need absolute paths in its configuration too: `[agents.pi] executable = "..."`. `4top --host NAME doctor` shows which of them the remote can resolve. |
 | Link dropped mid-resume | The session is unchanged in its transcript on that host; resume it again when the link is back. Keep agents alive across a drop with your own terminal multiplexer there. |
 | Remote host unreachable | `4top --host NAME doctor` shows the ssh exit and stderr. A missing key fails fast because `BatchMode` is always on. |
 | Remote `4top` not found | Non-login ssh shells may not have it on `PATH`; set `command` to an absolute path in `[hosts.NAME]`. |

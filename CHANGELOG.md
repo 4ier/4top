@@ -12,6 +12,12 @@ Get the ssh connection socket length right, measured rather than assumed.
 
 ## Unreleased
 
+- Document that an agent installed on a host can still be "not found" when that host's
+  4top is invoked over ssh, because a non-interactive session gets a minimal `PATH`.
+  The remedy is an absolute `[agents.NAME].executable` on that host, which is what the
+  error message already suggests.
+
+
 - Put the ssh connection socket somewhere short enough. Unix sockets have a hard
   path limit, and Termux on Android runs under
   `/data/data/com.termux/files/home`, so the connection path overflowed and every
