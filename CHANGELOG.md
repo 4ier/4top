@@ -45,6 +45,18 @@ terminal multiplexer of its own.
   and search state are dropped with the old scope, an in-flight refresh for the old
   scope is discarded, and the saved selection stays local.
 
+### Releases
+
+- Publish from CI on a `v<version>` tag: the suite runs, `scripts/check_release.py`
+  gates the release, both wheels are built and installed into a fresh environment,
+  `session-ls` is published before `4top`, and the GitHub release is opened. Uploads
+  use PyPI trusted publishing, so no token is stored in the repository, and the
+  manual trigger defaults to a dry run.
+- The gate refuses a tag that does not match the version, artifacts that are not the
+  versions being released, and a root requirement the library cannot satisfy. That
+  last one is real: the root requires `session-ls>=0.2.0` while PyPI only ever held
+  0.1.0, so publishing the root alone would have produced an uninstallable package.
+
 ### Interface
 
 - The host picker (`H`) switches the panel between this machine and a configured

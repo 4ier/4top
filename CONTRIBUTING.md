@@ -56,6 +56,31 @@ Run and update the [acceptance guide](docs/validation/README.md) before a releas
 Export the synthetic UI with `python scripts/export_demo.py`; the result must say
 DEMO. It is not a real-CLI demonstration or a performance benchmark.
 
+## Release
+
+Publishing is a tag; CI does the rest. PyPI versions are immutable, so a gate runs
+before anything is uploaded.
+
+1. Set the version in `pyproject.toml`, and in `packages/session-ls/pyproject.toml`
+   when the parser changed, and update the changelog.
+2. Check locally: `python scripts/check_release.py v<version>`.
+3. Tag and push: `git tag v<version> && git push origin v<version>`.
+4. CI runs the suite, gates the release, builds both wheels, installs them into a
+   fresh virtual environment, publishes `session-ls` first and `4top` second, and
+   opens the GitHub release.
+
+The gate is what stops the release that cannot work: the root wheel requires
+`session-ls>=0.2.0`, PyPI only ever held 0.1.0, so publishing the root alone would
+have produced a package nobody could install. A version already on PyPI is skipped
+rather than treated as an error, so re-running a release is safe;
+`python scripts/check_release.py --decide` says what would be uploaded.
+
+Uploads use PyPI trusted publishing, so no token is stored here. Configure a
+publisher on PyPI for the projects `4top` and `session-ls`, pointing at owner
+`4ier`, repository `4top`, workflow `publish.yml` and environment `pypi`. The
+manual trigger of that workflow defaults to a dry run, which rehearses the whole
+path without uploading.
+
 ## Reporting
 
 Use the bug template and redact paths, prompts and credentials. For security issues,

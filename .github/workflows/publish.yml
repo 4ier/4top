@@ -1,0 +1,106 @@
+name: publish
+
+# Publishing is a tag, nothing else. Push v<version> after the version in
+# pyproject.toml matches it, and CI runs the suite, gates the release, publishes
+# session-ls before 4top (the root requires it) and opens the GitHub release.
+#
+# Both uploads use PyPI trusted publishing: no token is stored in this repository.
+# Configure a publisher on PyPI for the projects `4top` and `session-ls`, pointing at
+# owner 4ier, repository 4top, workflow publish.yml and environment pypi.
+#
+# The manual trigger defaults to a dry run so the same path can be rehearsed.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and verify without uploading
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/test.yml
+
+  verify:
+    needs: test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - name: Install the build frontend
+        run: python -m pip install --upgrade build
+      - name: Gate the release
+        run: |
+          tag=""
+          if [ "${{ github.event_name }}" = "push" ]; then tag="$GITHUB_REF_NAME"; fi
+          python scripts/check_release.py $tag
+      - name: Build both distributions
+        run: |
+          python -m build --no-isolation packages/session-ls --outdir dist
+          python -m build --no-isolation --outdir dist
+      - name: The artifacts are the versions we validate
+        run: |
+          tag=""
+          if [ "${{ github.event_name }}" = "push" ]; then tag="$GITHUB_REF_NAME"; fi
+          python scripts/check_release.py $tag --dist dist
+      - name: Install both wheels into a fresh environment
+        run: python scripts/verify_install.py dist
+      - name: Split the uploads, session-ls first
+        id: split
+        run: |
+          mkdir -p upload-session-ls upload-root
+          mv dist/*session_ls* upload-session-ls/ || true
+          mv dist/* upload-root/ || true
+          ls -l upload-session-ls upload-root
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: |
+            upload-session-ls/*
+            upload-root/*
+
+  publish:
+    needs: verify
+    if: github.event_name == 'push' || inputs.dry_run == false
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: {name: distributions}
+      - name: Publish session-ls first
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ./upload-session-ls
+          print-hash: true
+      - name: Then publish 4top, which requires it
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: ./upload-root
+          print-hash: true
+
+  release:
+    needs: publish
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/download-artifact@v4
+        with: {name: distributions}
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --verify-tag --generate-notes upload-*/*

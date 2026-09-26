@@ -4,6 +4,8 @@ on:
     branches: [main, '4top/**']
   pull_request:
   workflow_dispatch:
+  # Reused by publish.yml, so a release cannot outrun the suite.
+  workflow_call:
 permissions:
   contents: read
 concurrency:

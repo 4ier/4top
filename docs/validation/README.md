@@ -93,6 +93,8 @@ only sanitized identifiers, versions and pass/fail observations.
 
 ## Publication gates
 
+Releases are published by the `publish` workflow from a `v<version>` tag, which
+runs the suite, `scripts/check_release.py`, the wheel install check and then PyPI.
 A stable/beta release still requires native-agent smoke evidence, a real
 two-machine remote run, physical terminal/SSH validation, further storage fault
 tests, and usability feedback. This alpha may be shared for reproducible testing
