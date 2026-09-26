@@ -61,6 +61,26 @@ line.
 The saved selection is local-only, because a history key from another machine
 means nothing here.
 
+## Deploying and updating the remote side
+
+The remote needs the CLI, and both this machine and the remote usually have working
+egress, so a normal install works. Two details bite in practice: a non-interactive
+ssh shell does not read login profiles (so the proxy environment and `PATH` are not
+there), and a host's own proxy is not always working.
+
+- Prefer a **git checkout** where git exists: the revision is then known and an
+  update is a `pull`. Where there is no pip, virtualenv or git, a self-contained
+  Python tree plus a two-line wrapper works, and a `REVISION` file records what is
+  deployed.
+- The updater on the host (`4top-update`) tries candidate proxies in order and takes
+  the first that answers, so a healthy host needs nothing from here.
+- When the host has no working egress at all, `scripts/remote_update.py NAME` opens a
+  reverse tunnel from this machine on a free port and hands it to the updater as
+  `FOURTOP_PROXY`. Nothing on the host is reconfigured.
+- `4top doctor` reports a `revision` on both sides; `4top --host NAME doctor` reports
+  a mismatch as an issue, because two machines running different revisions is how a
+  missing command turns into a confusing error.
+
 ## Preflight and flaky links
 
 An action preflights on the host that owns the session (`4top check KEY`). The panel

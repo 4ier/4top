@@ -143,6 +143,11 @@ than a hang, and the session stays in its transcript to be resumed again.
 4top doctor --json
 ```
 
+`doctor` also reports `revision`, and `4top --host NAME doctor` reports it for both
+sides, so a remote running older code is visible instead of failing later. Bring a
+remote forward with `scripts/remote_update.py NAME`; it uses the host's own egress
+first and falls back to a tunnel from this machine.
+
 `--config`, `--host` and `--no-color` work before or after the subcommand.
 `check` exits 0 when the session can resume here and 3 when it cannot. Keys
 may be shortened only when their prefixes are unambiguous (at least four

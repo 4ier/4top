@@ -13,6 +13,8 @@ directory is a hard error; 4top will not reset identity behind your back.
 | Cannot tell what is running | 4top never claims liveness. Use your own multiplexer, or the agent's native UI. |
 | `4top new` ended with the terminal | The agent runs in the foreground. Start 4top inside your own terminal multiplexer to keep it alive. |
 | `list` looks stale | `r` refreshes. Metadata rescans on `history_refresh_seconds`; remote hosts refresh on their own interval (default 15s). |
+| Remote runs older code | `4top --host NAME doctor` prints both revisions and reports a mismatch. Update with `scripts/remote_update.py NAME`. |
+| Remote has no working egress | Its own proxy may be down. `scripts/remote_update.py NAME` tunnels this machine's working egress to it for the update. |
 | Remote agent missing | The host that owns the session must have that agent installed. `4top --host NAME check KEY` says so before the panel hands the terminal over. |
 | Link dropped mid-resume | The session is unchanged in its transcript on that host; resume it again when the link is back. Keep agents alive across a drop with your own terminal multiplexer there. |
 | Remote host unreachable | `4top --host NAME doctor` shows the ssh exit and stderr. A missing key fails fast because `BatchMode` is always on. |

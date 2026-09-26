@@ -193,3 +193,23 @@ def test_check_command_exit_codes(lab, capsys):
     assert main(["--config", str(lab.config_file), "check", key, "--json"]) == 3
     report = json.loads(capsys.readouterr().out)
     assert report["resumable"] is False and report["cwd_missing"] is True
+
+
+def test_revision_is_known_or_honestly_unknown(tmp_path, monkeypatch):
+    from fourtop import doctor
+
+    # A deployed tree carries a REVISION file instead of git metadata.
+    package = tmp_path / "lib" / "fourtop" / "__init__.py"
+    package.parent.mkdir(parents=True)
+    package.write_text("")
+    assert doctor.revision(package) is None
+    (tmp_path / "REVISION").write_text("abc1234\n")
+    assert doctor.revision(package) == "abc1234"
+    (tmp_path / "REVISION").write_text("")
+    assert doctor.revision(package) is None
+
+    # This checkout is a git repository, so it reports a real revision.
+    import subprocess as _subprocess
+    expected = _subprocess.run(["git", "-C", str(SRC.parent), "rev-parse", "--short", "HEAD"],
+                               capture_output=True, text=True).stdout.strip()
+    assert doctor.revision() == expected

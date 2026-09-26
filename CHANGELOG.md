@@ -64,6 +64,12 @@ terminal multiplexer of its own.
   a dropped ssh connection says that the session is unchanged in its transcript.
 - The ssh connection keeps a liveness probe and a warm control connection, so an
   unstable link fails instead of hanging.
+- `doctor` reports the `revision` of the code it is running, and `--host NAME doctor`
+  reports both, so two machines on different revisions is visible instead of turning
+  into a confusing error later.
+- `scripts/remote_update.py NAME` brings a remote's 4top forward. It tries the host's
+  own egress first and falls back to a reverse tunnel from this machine, so a host
+  whose proxy is down can still update without reconfiguring anything on it.
 - `scripts/check_docs.py` fails when the documentation stops describing the code,
   and runs in a pre-commit hook, the test suite and CI.
 
