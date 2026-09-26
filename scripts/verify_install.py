@@ -44,7 +44,7 @@ def main():
         python = str(target / "bin/python")
         run([python, "-m", "pip", "install", *map(str, wheels)], env, root)
         version = run([str(target / "bin/4top"), "--version"], env, root).strip()
-        assert version == "4top 0.2.0a2", version
+        assert version == "4top 0.2.0a3", version
         demo = run([str(target / "bin/4top"), "--demo", "list", "--json"], env, root)
         rows = [json.loads(line) for line in demo.splitlines()]
         assert len(rows) == 6 and all(row["schema_version"] == 2 for row in rows)

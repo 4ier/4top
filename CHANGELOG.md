@@ -1,5 +1,15 @@
 # Changelog
 
+## 4top 0.2.0a3 — 2026-09-26
+
+Get the ssh connection socket length right, measured rather than assumed.
+
+- The socket directory now allows for what ssh actually creates there: a 40-character
+  `%C` hash plus a 16-character random suffix, under a limit measured at 103 bytes on
+  macOS and 106 on Android. The state directory is preferred, the temporary directory
+  is the fallback, and if neither fits, ssh runs without connection reuse instead of
+  failing every host.
+
 ## Unreleased
 
 - Put the ssh connection socket somewhere short enough. Unix sockets have a hard

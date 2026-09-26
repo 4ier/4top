@@ -9,7 +9,7 @@
 
 ![4top 合成演示，未读取用户历史](docs/demo/demo.svg)
 
-> 当前为 **0.2.0a2 alpha**。当前开发线不持有进程，也不驱动任何多路复用器。
+> 当前为 **0.2.0a3 alpha**。当前开发线不持有进程，也不驱动任何多路复用器。
 > Codex **0.155.1** 在早期版本上通过了已认证的精确恢复冒烟；
 > Claude Code、Pi 与其他原生版本未认证。
 > [验收记录](docs/validation/macos-0.1.0a2.md)。已以 pre-release 形式发布到 PyPI：`uv tool install 4top`。

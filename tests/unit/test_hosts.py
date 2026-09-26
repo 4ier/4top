@@ -300,19 +300,57 @@ def test_a_remote_without_check_is_stated_not_fatal(remote):
 
 
 def test_control_socket_path_stays_short_enough(tmp_path):
-    # Termux on Android runs under /data/data/com.termux/files/home, which pushed the
-    # socket path past the Unix-domain limit and made every remote call fail.
+    # Termux on Android runs under /data/data/com.termux/files/home, where the state
+    # directory is long enough to overflow the Unix-domain socket limit and make every
+    # remote call fail. ssh names the socket <ControlPath>.<hash>.<random>, and the
+    # limit was measured as 103 bytes on macOS and 106 on Android.
+    import os
+    import shutil
+    import tempfile
+    from pathlib import Path
+
+    from fourtop.config import Config
+    from fourtop.hosts import CONTROL_PATH_LIMIT, CONTROL_SOCKET_LENGTH, control_dir, ssh_argv
+
+    # A short writable temporary directory, resolved so it holds no symlink.
+    temporary = Path(tempfile.mkdtemp(prefix="cpt-", dir="/tmp")).resolve()
+    deep = tmp_path / ("very/deep/" * 12)
+    (deep / "home").mkdir(parents=True)
+    try:
+        config = Config.load(environment={**os.environ, "HOME": str(deep / "home"),
+                                         "TMPDIR": str(temporary)})
+        chosen = control_dir(config)
+        assert chosen == str(temporary / "4top"), chosen
+        assert len(chosen) + CONTROL_SOCKET_LENGTH <= CONTROL_PATH_LIMIT
+        assert "/%C" in " ".join(ssh_argv(config, config.resolve_host("me@venus"), ["list"]))
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
+def test_a_short_state_directory_is_preferred(lab):
+    # Nothing changes for an ordinary HOME.
+    from fourtop.hosts import control_dir, ssh_argv
+
+    assert control_dir(lab.config) == str(lab.config.state_dir / "ssh")
+    assert "ControlMaster=auto" in " ".join(
+        ssh_argv(lab.config, lab.config.resolve_host("me@venus"), ["list"]))
+
+
+def test_nowhere_short_enough_still_runs_ssh(tmp_path):
+    # A pathological HOME must not make remote hosts unusable: ssh runs without
+    # connection reuse instead of failing.
     import os
 
     from fourtop.config import Config
-    from fourtop.hosts import CONTROL_PATH_LIMIT, control_dir, ssh_argv
+    from fourtop.hosts import control_dir, ssh_argv
 
-    deep = tmp_path / ("very/deep/" * 12) / "home"
-    deep.mkdir(parents=True)
-    environment = {**os.environ, "HOME": str(deep), "XDG_STATE_HOME": str(deep / "state")}
-    config = Config.load(environment=environment)
-    for candidate in (control_dir(config), os.path.dirname(control_dir(config))):
-        pass
-    path = f"{control_dir(config)}/%C"
-    assert len(path.replace("%C", "a" * 40)) <= CONTROL_PATH_LIMIT, path
-    assert "ControlPath=" + path in " ".join(ssh_argv(config, config.resolve_host("me@venus"), ["list"]))
+    deep = tmp_path / ("long/" * 20)
+    (deep / "home").mkdir(parents=True)
+    (deep / "tmp").mkdir()
+    config = Config.load(environment={**os.environ, "HOME": str(deep / "home"),
+                                     "TMPDIR": str(deep / "tmp")})
+    assert control_dir(config) is None
+    argv = ssh_argv(config, config.resolve_host("me@venus"), ["list"])
+    assert "ControlPath" not in " ".join(argv)
+    assert "ControlMaster" not in " ".join(argv)
+    assert "BatchMode=yes" in argv

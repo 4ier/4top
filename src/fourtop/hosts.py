@@ -6,55 +6,62 @@ existing CLI, so anything this module can do is something a person could type.
 from __future__ import annotations
 
 import json
-import os
 import shlex
 import subprocess
 from pathlib import Path
 
 from session_ls.api import clean_text
-from session_ls.storage import private_dir
+from session_ls.storage import StorageError, private_dir
 
 from .config import Config, Host
 from .errors import Unavailable
 from .models import ROW_SCHEMA, Session, Snapshot
 
-# BatchMode never prompts; ControlMaster reuses one warm connection (a handshake per
-# refresh is wasteful on a good link and painful on a bad one); the ServerAlive pair
-# turns a dead link into an error in about 45 seconds instead of a hang.
-SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ControlMaster=auto", "-o", "ControlPersist=60",
-               "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=3",
-               "-o", "TCPKeepAlive=yes")
+# BatchMode never prompts, and the ServerAlive pair turns a dead link into an error in
+# about 45 seconds instead of a hang.
+SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ServerAliveInterval=15",
+               "-o", "ServerAliveCountMax=3", "-o", "TCPKeepAlive=yes")
+# Reusing one warm connection saves a handshake per refresh, but the socket has to fit.
+SSH_MULTIPLEX = ("-o", "ControlMaster=auto", "-o", "ControlPersist=60")
 
 
-# Unix sockets have a hard path limit (104 bytes on macOS). A deep HOME can exceed
-# it: Termux on Android runs under /data/data/com.termux/files/home, which pushed the
-# connection socket over the limit and made every remote call fail with
+# Unix sockets have a hard path limit (104 bytes on macOS, 108 on Android, NUL
+# included, measured), and ssh names the socket it binds <ControlPath>.<40-character
+# %C hash>.<16-character random suffix>. The directory therefore has 45 characters to
+# work with. Termux runs under /data/data/com.termux/files/home, where the state
+# directory alone is 54, and every remote call failed with
 # "unix_listener: path ... too long for Unix domain socket".
-CONTROL_PATH_LIMIT = 100
+CONTROL_PATH_LIMIT = 103
+CONTROL_SOCKET_LENGTH = 1 + 40 + 1 + 16  # .<40-char hash>.<16-char suffix>
 
 
-def control_dir(config: Config) -> str:
-    """The shortest private directory that can hold a connection socket.
+def control_dir(config: Config) -> str | None:
+    """A writable private directory short enough for a connection socket, or None.
 
-    ``%C`` expands to a 40-character hash, so the directory plus the name has to fit.
-    The state directory is tried first, then the temporary directory, then ``/tmp``.
+    The state directory is preferred, then the temporary directory: on Android the
+    temporary directory is the one that fits, and ``/tmp`` is not writable at all
+    (and on macOS it is a symlink this project refuses to write through). ``None``
+    means run ssh without connection reuse, which is slower but always works.
     """
-    uid = os.getuid()
     temporary = config.environment.get("TMPDIR") or "/tmp"
-    for candidate in (config.state_dir / "ssh",
-                      Path(temporary) / f"4top-{uid}",
-                      Path("/tmp") / f"4top-{uid}"):
-        if len(str(candidate)) + 1 + 40 <= CONTROL_PATH_LIMIT:
+    budget = CONTROL_PATH_LIMIT - CONTROL_SOCKET_LENGTH
+    for candidate in (config.state_dir / "ssh", Path(temporary) / "4top"):
+        if len(str(candidate)) > budget:
+            continue
+        try:
             return str(private_dir(candidate))
-    raise Unavailable("No path is short enough for the ssh connection socket; "
-                      "set TMPDIR to something short")
+        except (OSError, StorageError):
+            continue
+    return None
 
 
 def ssh_argv(config: Config, host: Host, args: list[str], *, tty: bool = False) -> list[str]:
     """Build one local argv. ssh hands the last element to a remote shell, so every
     remote argument is quoted for that shell rather than trusted as a literal."""
-    options = [*SSH_OPTIONS, "-o", f"ConnectTimeout={max(1, int(host.timeout_seconds))}",
-               "-o", f"ControlPath={control_dir(config)}/%C"]
+    options = [*SSH_OPTIONS, "-o", f"ConnectTimeout={max(1, int(host.timeout_seconds))}"]
+    directory = control_dir(config)
+    if directory:
+        options = [*options, *SSH_MULTIPLEX, "-o", f"ControlPath={directory}/%C"]
     if tty:
         options.append("-t")
     remote = " ".join(shlex.quote(value) for value in (host.command, *args))
