@@ -65,18 +65,18 @@ jobs:
           python scripts/check_release.py $tag --dist dist
       - name: Install both wheels into a fresh environment
         run: python scripts/verify_install.py dist
-      - name: Split the uploads, session-ls first
-        run: |
-          mkdir -p upload-session-ls upload-root
-          mv dist/*session_ls* upload-session-ls/ || true
-          mv dist/* upload-root/ || true
-          ls -l upload-session-ls upload-root
       - name: Decide what is new, so an existing version is skipped
         id: decide
         run: |
           tag=""
           if [ "${{ github.event_name }}" = "push" ]; then tag="$GITHUB_REF_NAME"; fi
           python scripts/check_release.py $tag --dist dist --decide >> "$GITHUB_OUTPUT"
+      - name: Split the uploads, session-ls first
+        run: |
+          mkdir -p upload-session-ls upload-root
+          mv dist/*session_ls* upload-session-ls/ || true
+          mv dist/* upload-root/ || true
+          ls -l upload-session-ls upload-root
       - uses: actions/upload-artifact@v4
         with:
           name: distributions
