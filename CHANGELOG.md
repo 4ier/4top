@@ -2,6 +2,10 @@
 
 ## 4top 0.2.0a1 — 2026-09-26
 
+Published to PyPI from tag `v0.2.0a1`, together with `session-ls 0.2.0` as its
+dependency. Being a pre-release, `pip install 4top` needs `--pre`; `uv tool
+install 4top` does not.
+
 The first release of the session-first line: 4top tracks transcripts rather than
 processes, and reaches other machines over ssh. The previous line owned a process
 per launch and reported liveness; that layer and its vocabulary are gone.

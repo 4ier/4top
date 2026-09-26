@@ -14,13 +14,28 @@ daemon, account, model calls, or telemetry.
 > multiplexer of its own. Codex **0.155.1** passed an authenticated exact-resume
 > smoke check against an earlier build;
 > Claude Code, Pi and other native versions are not certified.
-> [Evidence](docs/validation/macos-0.1.0a2.md). This release is not on PyPI.
+> [Evidence](docs/validation/macos-0.1.0a2.md). It is on PyPI as a pre-release: `uv tool install 4top`.
 
-## Install from this checkout
+## Install
 
 macOS or Linux; **Python 3.11+**. No multiplexer is required. Current validation
 records, rather than this minimum target, determine which versions were tested.
 Windows users need a Linux environment such as WSL; native Windows is unsupported.
+
+```sh
+uv tool install 4top            # alpha, so a pre-release
+pip install --pre 4top          # pip needs --pre for a pre-release
+```
+
+`session-ls`, the parser this builds on, is an ordinary dependency on PyPI. A pip
+mirror may lag behind for a new project: if `4top` seems not to exist, add
+`--index-url https://pypi.org/simple`, or wait for the mirror to sync.
+
+```sh
+4top --demo                     # isolated synthetic demo, no real history
+```
+
+### From this checkout
 
 ```sh
 git clone https://github.com/4ier/4top.git
@@ -30,9 +45,9 @@ python3 -m venv .venv
 .venv/bin/4top --demo
 ```
 
-Both local packages are intentionally supplied to pip: `session-ls 0.2.0` is not
-assumed to exist on a package registry. The root wheel contains only `fourtop`;
-the independent `session-ls` package retains its small, stdlib-only CLI.
+Both local packages are supplied to pip here so the checkout is self-contained
+while `session-ls` is being changed alongside it. The root wheel contains only
+`fourtop`; the independent `session-ls` package retains its small, stdlib-only CLI.
 
 ```sh
 . .venv/bin/activate
