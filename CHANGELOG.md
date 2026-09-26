@@ -51,10 +51,13 @@ terminal multiplexer of its own.
 
 ### Releases
 
-- Publish each project from its own job, with its own PyPI environment. One job
-  means one OIDC exchange, and a token minted for `session-ls` is refused for
-  `4top`; the first publish attempt failed exactly that way after `session-ls 0.2.0`
-  had already been accepted.
+- Publish one project per repository. The first attempt to publish both from this
+  workflow failed with `403 Invalid API Token: OIDC scoped token is not valid for
+  project '4top'`: one job means one OIDC exchange, and the token is scoped to the
+  project its publisher matched. Rather than disambiguate two publishers with two
+  environments, this workflow now publishes only `4top` and consumes `session-ls`
+  from PyPI, which is the layout the two packages actually have: separate projects,
+  separate version lines, separate pipelines.
 - Publish from CI on a `v<version>` tag: the suite runs, `scripts/check_release.py`
   gates the release, both wheels are built and installed into a fresh environment,
   `session-ls` is published before `4top`, and the GitHub release is opened. Uploads

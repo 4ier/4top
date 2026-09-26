@@ -66,8 +66,7 @@ before anything is uploaded.
 2. Check locally: `python scripts/check_release.py v<version>`.
 3. Tag and push: `git tag v<version> && git push origin v<version>`.
 4. CI runs the suite, gates the release, builds both wheels, installs them into a
-   fresh virtual environment, publishes `session-ls` first and `4top` second, and
-   opens the GitHub release.
+   fresh virtual environment, publishes `4top`, and opens the GitHub release.
 
 The gate is what stops the release that cannot work: the root wheel requires
 `session-ls>=0.2.0`, PyPI only ever held 0.1.0, so publishing the root alone would
@@ -75,18 +74,15 @@ have produced a package nobody could install. A version already on PyPI is skipp
 rather than treated as an error, so re-running a release is safe;
 `python scripts/check_release.py --decide` says what would be uploaded.
 
-Uploads use PyPI trusted publishing, so no token is stored here. Configure one
-publisher per project on PyPI, pointing at owner `4ier`, repository `4top` and
-workflow `publish.yml`, with these environment names:
+Uploads use PyPI trusted publishing, so no token is stored here. It needs one
+publisher on PyPI for the project `4top`, pointing at owner `4ier`, repository
+`4top`, workflow `publish.yml` and environment `pypi`.
 
-| Project | Environment |
-| --- | --- |
-| `session-ls` | `pypi-session-ls` |
-| `4top` | `pypi-4top` |
-
-The environment distinguishes two otherwise identical publishers, and each project
-publishes from its own job: one job means one OIDC exchange, so a second project
-would upload with the first project's token and be refused. The
+This repository publishes one project. `session-ls` has its own repository and its
+own pipeline and is consumed here as an ordinary PyPI dependency; publishing two
+projects from one workflow would need two jobs and two distinguishable publishers,
+because one job means one OIDC exchange and the minted token is scoped to the project
+its publisher matched. The
 manual trigger of that workflow defaults to a dry run, which rehearses the whole
 path without uploading.
 
