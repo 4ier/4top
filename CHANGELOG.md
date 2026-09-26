@@ -45,6 +45,21 @@ terminal multiplexer of its own.
   and search state are dropped with the old scope, an in-flight refresh for the old
   scope is discarded, and the saved selection stays local.
 
+### Interface
+
+- The host picker (`H`) switches the panel between this machine and a configured
+  host, so comparing two machines no longer means relaunching.
+- The selection line is context and one action: `agent · directory` and what Enter
+  does. The history key moved to the details screen, where it is needed, and the
+  status line says nothing when there is nothing to report.
+- A recorded directory that no longer exists now names itself, is marked in the
+  details screen, and asks for a directory to resume in instead of failing with
+  "not accessible".
+- The mouse wheel moves the highlight with the view instead of scrolling the
+  viewport away from it.
+- `scripts/check_docs.py` fails when the documentation stops describing the code,
+  and runs in a pre-commit hook, the test suite and CI.
+
 ### Fixes in this line
 
 - A large history no longer costs a full re-render on every refresh. Rows whose

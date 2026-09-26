@@ -102,7 +102,7 @@ class Drivers:
         if not path.is_absolute():
             path = Path.cwd() / path
         if not path.is_dir() or not os.access(path, os.R_OK | os.X_OK):
-            raise Missing("Working directory does not exist or is not accessible")
+            raise Missing(f"Directory does not exist or is not accessible: {path}")
         return str(path.resolve())
 
     def plan_new(self, agent: str, cwd: str, extra: tuple[str, ...] = ()) -> LaunchPlan:

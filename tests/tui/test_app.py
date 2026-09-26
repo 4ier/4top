@@ -4,7 +4,16 @@ from types import SimpleNamespace
 import pytest
 from textual.widgets import DataTable, Input, Static
 
-from fourtop.app import Confirm, Details, FourtopApp, NewAgent, Preview
+from fourtop.app import (
+    WHEEL_ROWS,
+    Confirm,
+    Details,
+    DirectoryPrompt,
+    FourtopApp,
+    NewAgent,
+    Preview,
+    SessionTable,
+)
 from fourtop.models import LaunchPlan
 from fourtop.services import DemoManager
 
@@ -162,7 +171,7 @@ async def test_unchanged_rows_are_not_retexted(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_enter_confirms_before_resuming_and_runs_the_plan():
+async def test_enter_confirms_before_resuming_and_runs_the_plan(tmp_path):
     calls = []
 
     class RecordingDemo(DemoManager):
@@ -178,6 +187,7 @@ async def test_enter_confirms_before_resuming_and_runs_the_plan():
             return 0
 
     manager = RecordingDemo()
+    manager.rows = [replace(row, cwd=str(tmp_path)) for row in manager.rows]
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
@@ -204,7 +214,7 @@ async def test_cursor_rows_are_preview_only():
         assert not row.can_resume
         app.selected_key = row.key
         app.render_rows()
-        assert "preview only" in str(app.query_one("#selection", Static).render())
+        assert "Enter: preview" in str(app.query_one("#selection", Static).render())
         await pilot.press("q")
 
 
@@ -220,3 +230,77 @@ async def test_derived_labels_follow_row_changes():
         # The cached project label must not outlive the row it was derived from.
         assert app.query_one(DataTable).get_cell("demo_1", "project").plain == "renamed-project"
         await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_footer_has_no_key_and_status_says_nothing_when_there_is_nothing():
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        selection = str(app.query_one("#selection", Static).render())
+        assert "Enter: preview" in selection
+        assert "demo_1" not in selection and "h_" not in selection
+        # DEMO labels itself, so the status line carries only that note.
+        assert "keeps nothing running" not in str(app.query_one("#status", Static).render())
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_wheel_moves_the_highlight_with_the_view():
+    from textual.events import MouseScrollDown, MouseScrollUp
+
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        table = app.query_one(SessionTable)
+        assert table.cursor_row == 0
+        table._on_mouse_scroll_down(MouseScrollDown(table, 0, 0, 0, 1, 0, False, False, False))
+        await pilot.pause()
+        assert table.cursor_row == WHEEL_ROWS
+        assert app.selected_key == app.shown[WHEEL_ROWS].key
+        table._on_mouse_scroll_up(MouseScrollUp(table, 0, 0, 0, 1, 0, False, False, False))
+        assert table.cursor_row == 0
+        # Clamped at both ends rather than scrolling the viewport away.
+        for _ in range(20):
+            table._on_mouse_scroll_up(MouseScrollUp(table, 0, 0, 0, 1, 0, False, False, False))
+        assert table.cursor_row == 0 and table.scroll_y == 0
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_resume_asks_for_a_directory_when_the_recorded_one_is_gone(tmp_path):
+    calls = []
+
+    class GoneDemo(DemoManager):
+        demo = False
+        store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
+
+        def resume(self, query, cwd=None):
+            calls.append((query, cwd))
+            return LaunchPlan("pi", "/fake/pi", ("/fake/pi",), cwd or "/gone", {})
+
+    manager = GoneDemo()
+    manager.rows = [replace(row, cwd="/definitely/not/here") for row in manager.rows]
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        await pilot.press("enter")
+        await pilot.pause(.2)
+        assert isinstance(app.screen, DirectoryPrompt)
+        app.screen.query_one("#cwd", Input).value = "/nope"
+        app.screen.query_one("#use").press()
+        await pilot.pause(.1)
+        assert isinstance(app.screen, DirectoryPrompt), "a missing path must not be accepted"
+        app.screen.query_one("#cwd", Input).value = str(tmp_path)
+        app.screen.query_one("#use").press()
+        await pilot.pause(.3)
+        assert calls == [(app.shown[0].key, str(tmp_path))], "the chosen directory is used"
+        await pilot.press("q")
+
+
+def test_details_marks_a_directory_that_is_gone():
+    from fourtop.models import Session
+
+    row = Session("h_x", "pi", "/gone/away", "t", "2026-01-01T00:00:00+00:00",
+                  "2026-01-01T00:00:00+00:00")
+    assert "(missing)" in "\n".join(Details(row).lines())

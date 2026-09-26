@@ -12,7 +12,14 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -e ./packages/session-ls -e '.[dev]'
 .venv/bin/python -m pytest
 .venv/bin/python -m ruff check .
+git config core.hooksPath .githooks   # once per clone: run the gates before commit
 ```
+
+`scripts/check_docs.py` fails when the documentation stops describing the code: an
+undocumented command or key, a documented command that no longer exists, a missing
+configuration option, a broken relative link, or vocabulary from a design that has
+been removed. It runs in the pre-commit hook, in the test suite and in CI, so a
+stale README blocks the change instead of misleading the next reader.
 
 To make the `4top` command itself run this checkout, install it as an editable
 tool. Otherwise a previously installed copy keeps running older code, which looks

@@ -37,7 +37,6 @@ where = ["src"]
 testpaths = ["tests", "packages/session-ls/tests"]
 pythonpath = ["src", "packages/session-ls/src"]
 asyncio_mode = "auto"
-markers = ["tmux: requires an installed tmux binary", "pty: exercises a real pseudoterminal"]
 
 [tool.ruff]
 target-version = "py311"

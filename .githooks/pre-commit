@@ -1,0 +1,22 @@
+#!/bin/sh
+# Gates that would otherwise wait for CI. Enable once per clone with:
+#   git config core.hooksPath .githooks
+set -e
+cd "$(git rev-parse --show-toplevel)"
+
+python=.venv/bin/python
+if [ ! -x "$python" ]; then
+    python=python3
+fi
+
+"$python" scripts/check_docs.py
+
+if [ -x .venv/bin/ruff ]; then
+    .venv/bin/ruff check .
+fi
+
+# A staged change to the code that the docs describe is exactly what makes them
+# stale, so run the documentation gate and the host/panel tests then.
+if git diff --cached --name-only | grep -q '^\(src/fourtop\|packages/session-ls\)/'; then
+    "$python" -m pytest -q -x tests/unit/test_docs.py tests/unit/test_hosts.py
+fi

@@ -1,4 +1,4 @@
-"""4top starts a native CLI. It owns no pane, so these tests use real processes only."""
+"""4top starts a native CLI as a real process; it allocates no terminal of its own."""
 import hashlib
 import json
 import subprocess
@@ -34,8 +34,7 @@ def test_new_plan_runs_the_original_cli_in_the_requested_directory(lab):
     assert report["cwd"] == str(lab.path)
     assert report["native_id"] == plan.native_id
     assert report["term"] == "xterm-256color"
-    assert not any("tmux" in value or "byobu" in value for value in plan.argv), \
-        "4top never routes an agent through a multiplexer"
+    assert plan.argv[1:] == ("--session-id", plan.native_id), "exactly one native command line"
     assert report["argv"] == list(plan.argv[1:])
     canary = lab.env["TEST_CANARY"].encode()
     assert report["canary_hash"] == hashlib.sha256(canary).hexdigest()

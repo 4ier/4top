@@ -29,6 +29,32 @@ def plain(value, *, multiline=False) -> Text:
 
 
 
+WHEEL_ROWS = 3
+
+
+class SessionTable(DataTable):
+    """A table whose wheel moves the highlight.
+
+    Scrolling the viewport away from the highlight leaves Enter acting on a row
+    that is off screen, so a wheel step moves the cursor and the view follows it.
+    """
+
+    def _wheel(self, rows: int) -> None:
+        if not self.row_count:
+            return
+        target = max(0, min(self.row_count - 1, self.cursor_row + rows))
+        if target != self.cursor_row:
+            self.move_cursor(row=target, animate=False)
+
+    def _on_mouse_scroll_down(self, event) -> None:
+        event.stop()
+        self._wheel(WHEEL_ROWS)
+
+    def _on_mouse_scroll_up(self, event) -> None:
+        event.stop()
+        self._wheel(-WHEEL_ROWS)
+
+
 class Confirm(ModalScreen[bool]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -91,6 +117,49 @@ class NewAgent(ModalScreen[tuple | None]):
         self.dismiss(None)
 
 
+class DirectoryPrompt(ModalScreen[str | None]):
+    """The recorded directory is gone; ask for the one to resume in."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, recorded: str, initial: str):
+        super().__init__()
+        self.recorded, self.initial = recorded, initial
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static("Choose a working directory", classes="dialog-title")
+            yield Static(plain(f"The recorded directory no longer exists:\n{self.recorded}\n\n"
+                               "Resuming runs there, and 4top never creates a directory."))
+            yield Input(value=self.initial, placeholder="Absolute path", id="cwd")
+            yield Static("", id="form-error")
+            with Horizontal(classes="buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Use this directory", id="use", variant="primary")
+
+    def on_mount(self):
+        self.query_one("#cwd", Input).focus()
+
+    @on(Input.Submitted, "#cwd")
+    def submitted(self, event: Input.Submitted):
+        self.query_one("#use", Button).press()
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed):
+        if event.button.id == "cancel":
+            self.dismiss(None)
+            return
+        value = self.query_one("#cwd", Input).value.strip()
+        candidate = Path(value).expanduser() if value else None
+        if candidate is None or not candidate.is_dir():
+            self.query_one("#form-error", Static).update("Not an existing directory.")
+            return
+        self.dismiss(str(candidate))
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
 class Preview(ModalScreen):
     BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close")]
 
@@ -146,24 +215,31 @@ class Details(ModalScreen[str | None]):
         super().__init__()
         self.row, self.demo = row, demo
 
-    def compose(self) -> ComposeResult:
+    def lines(self) -> list[str]:
+        """Everything the screen shows. A missing directory is worth naming here:
+        resuming from one is impossible, and the reason is not obvious from the path."""
         row = self.row
+        directory = Path(row.cwd).expanduser() if row.cwd else None
+        missing = "" if directory and directory.is_dir() else "  (missing)"
         lines = [f"Key: {row.key}", f"Agent: {row.agent}", f"Host: {row.host}",
-                 f"Directory: {row.cwd}", f"Title: {row.title}",
+                 f"Directory: {row.cwd}{missing}", f"Title: {row.title}",
                  f"Started: {row.started}", f"Last written: {row.last}",
                  f"Status: {row.status}", f"Source: {row.source}"]
         lines.extend(f"Problem: {problem}" for problem in row.problems)
         lines.append(row.issue or "")
-        lines.append("4top does not track a running process. Resuming starts a new one; "
-                     "the original memory, shell children and network connections are gone.")
+        lines.append("Resume starts a new process: memory, shell children and network "
+                     "state are not restored.")
+        return lines
+
+    def compose(self) -> ComposeResult:
         with Vertical(classes="dialog preview-dialog"):
             yield Static("Session details", classes="dialog-title")
             with VerticalScroll(classes="dialog-body"):
-                yield Static(plain("\n".join(lines), multiline=True))
+                yield Static(plain("\n".join(self.lines()), multiline=True))
             with Horizontal(classes="buttons"):
                 yield Button("Close", id="close")
                 yield Button("Resume…", id="resume", variant="primary",
-                             disabled=self.demo or not row.can_resume)
+                             disabled=self.demo or not self.row.can_resume)
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed):
@@ -279,7 +355,7 @@ class FourtopApp(App[tuple | None]):
         yield Static(plain(label), id="brand")
         yield Static("Opening the view…", id="counts")
         yield Input(placeholder="Search titles, directories, agents or keys · Ctrl-F: full content · Esc: clear", id="query")
-        yield DataTable(id="table", cursor_type="row", show_row_labels=False, zebra_stripes=True)
+        yield SessionTable(id="table", cursor_type="row", show_row_labels=False, zebra_stripes=True)
         yield Static("", id="selection")
         yield Static("", id="status")
         yield Static("/ search   Enter resume   n new   H host   Space preview   i details   ? help   q quit", id="keys")
@@ -417,8 +493,7 @@ class FourtopApp(App[tuple | None]):
         self.query_one("#counts", Static).update(plain(label))
         self.show_selection()
         issues = self._full_issues + self.snapshot_data.issues
-        message = self._status_message or (" · ".join(issues[:2]) if issues
-                                           else "Resuming starts a new process; 4top keeps nothing running.")
+        message = self._status_message or " · ".join(issues[:2])
         if self._full_running:
             message = "Searching decoded raw records… Esc cancels. The table stays usable."
         elif not rows and not terms:
@@ -435,10 +510,10 @@ class FourtopApp(App[tuple | None]):
         if not row:
             self.query_one("#selection", Static).update("No selection. Clear the search or press r.")
             return
-        verb = ("preview only" if self.manager.demo else
-                f"resume on {row.host}…" if self.manager.remote else
-                "resume as a new process…" if row.can_resume else "inspect details")
-        info = f"{row.agent} · {row.cwd}\nEnter: {verb} · {row.key}"
+        verb = ("preview" if self.manager.demo else
+                f"resume on {row.host}" if self.manager.remote else
+                "resume" if row.can_resume else "details")
+        info = f"{row.agent} · {row.cwd}\nEnter: {verb}"
         self.query_one("#selection", Static).update(plain(info, multiline=True))
 
     @on(DataTable.RowHighlighted)
@@ -616,10 +691,19 @@ class FourtopApp(App[tuple | None]):
         else:
             self.action_details()
 
-    def _confirm_resume(self, row: Session):
+    def _confirm_resume(self, row: Session, cwd: str | None = None):
         if self._launching:
             self.set_status("A launch is already in progress in this panel.")
             return
+        if not self.manager.remote and not self.manager.demo and cwd is None:
+            recorded = Path(row.cwd).expanduser() if row.cwd else None
+            if recorded is None or not recorded.is_dir():
+                # The dialog already says what will happen, so its button is the
+                # confirmation: asking twice for the same decision is noise.
+                self.push_screen(DirectoryPrompt(row.cwd, os.getcwd()),
+                                 lambda answer: self.run_worker(self._resume(row, answer))
+                                 if answer else None)
+                return
         if self.manager.remote:
             message = (f"This runs on {row.host} through ssh and creates a NEW {row.agent} process there.\n"
                        f"Directory: {row.cwd}\nSession: {row.key}\n"
@@ -628,14 +712,14 @@ class FourtopApp(App[tuple | None]):
                              lambda answer: self.run_worker(self._resume(row)) if answer else None)
             return
         native = row.record.native_id if row.record else None
-        message = (f"This creates a NEW {row.agent} process.\nDirectory: {row.cwd}\n"
+        message = (f"This creates a NEW {row.agent} process.\nDirectory: {cwd or row.cwd}\n"
                    f"Session: {row.key}\nNative ID: {native or 'exact source path'}\n"
                    "Current native configuration applies; original launch flags are not replayed.\n"
                    "Native execution may modify files or incur model costs.")
         self.push_screen(Confirm("Resume session", message),
-                         lambda answer: self.run_worker(self._resume(row)) if answer else None)
+                         lambda answer: self.run_worker(self._resume(row, cwd)) if answer else None)
 
-    async def _resume(self, row: Session):
+    async def _resume(self, row: Session, cwd: str | None = None):
         self._launching = True
         try:
             if self.manager.remote:
@@ -644,13 +728,13 @@ class FourtopApp(App[tuple | None]):
                 self._hand_over(lambda: subprocess.call(command), f"Resuming on {row.host}…",
                                 f"Run `4top --host {row.host} resume {row.key}` instead.")
                 return
-            plan = await asyncio.to_thread(self.manager.resume, row.key)
+            plan = await asyncio.to_thread(self.manager.resume, row.key, cwd)
         except (FourtopError, OSError, ValueError) as exc:
             self._launching = False
             self.set_status(str(exc))
             return
         self._launching = False
-        self._hand_over(lambda: self.manager.run(plan), f"Resuming {plan.agent} in this terminal…",
+        self._hand_over(lambda: self.manager.run(plan), f"Resuming {plan.agent}…",
                         f"Run `4top resume {row.key}` instead.")
 
     def _hand_over(self, action, message: str, fallback: str = ""):
@@ -671,8 +755,7 @@ class FourtopApp(App[tuple | None]):
             "Ctrl-F: explicit full-content search   Space: read-only preview   i: details",
             "n: new agent   H: switch host   r: refresh   q / Ctrl-C: close only the panel",
             "Esc: close dialog, cancel full search or clear the query",
-            "4top tracks no process: Resume always starts a new one from the transcript.",
-            "A resumed agent cannot recover memory, shell children or network state.",
+            "Resume always starts a new process from the transcript.",
             "Deep search reads only approved local sources and executes nothing.",
             "No automatic restart, model calls, or telemetry.",
         ))))

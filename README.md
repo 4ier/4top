@@ -64,7 +64,8 @@ multiplexer you already use.
 | `/`, `Enter`, `Esc` | Search metadata, return to table, clear/cancel |
 | `Ctrl-F` | Explicit literal full-content search; `Esc` cancels |
 | `Space`, `i` | Read-only preview, details |
-| `n`, `r`, `?`, `q` | New agent, refresh, help, close panel |
+| `n`, `r`, `?` | New agent, refresh, help |
+| `q`, `Ctrl-C` | Close only the panel |
 
 Search supports case-insensitive words and quoted phrases; all terms must match.
 Full search decodes JSON text, including Chinese escaped as `\u....`. It reads
@@ -82,9 +83,9 @@ restore lost memory, network connections, shell children, or a destroyed machine
 Resume uses the CLI's **current native configuration**; 4top does not replay the
 original launch flags. Review native permissions before sending another task.
 
-Because 4top owns no process it also reports no liveness: no `LIVE`, no `EXIT`, no
-`MISSING`. A row is a session you can resume, and that is all it claims. Failed
-queries are reported as issues and never rendered as an empty machine.
+Because 4top owns no process it claims nothing about liveness either: a row is a
+session you can resume, and that is all it says. Failed queries are reported as
+issues and never rendered as an empty machine.
 
 Two consequences worth knowing. A resumed agent is a **new** process; two agents in
 one directory still have **no code/worktree isolation**. And `4top new` runs the
@@ -102,7 +103,8 @@ CLI, and the local 4top only runs it.
 [hosts.build-box]
 ssh = "me@build-box"                 # any ssh destination, including a tailnet name
 # command = "/opt/4top/bin/4top"     # if a non-login PATH does not include 4top
-# refresh_seconds = 15.0
+# refresh_seconds = 15.0               # slower than local: each tick is a round trip
+# timeout_seconds = 10.0
 ```
 
 ```sh

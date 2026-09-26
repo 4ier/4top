@@ -56,7 +56,7 @@ report_file = reports / (str(os.getpid()) + ".json")
 identity = uuid.uuid4().hex
 report = {"agent": agent, "pid": os.getpid(), "nonce": identity, "count": 0,
           "native_id": native, "cwd": os.getcwd(), "argv": args, "source": str(source),
-          "pane": os.environ.get("TMUX_PANE"), "term": os.environ.get("TERM"),
+          "term": os.environ.get("TERM"),
           "canary_hash": hashlib.sha256(os.environ.get("TEST_CANARY", "").encode()).hexdigest()}
 child = None
 if "--child" in args:
@@ -82,7 +82,7 @@ signal.signal(signal.SIGWINCH, lambda s, f: print("RESIZED", flush=True))
 save()
 print(f"FAKE {agent} PID={os.getpid()} NONCE={identity}", flush=True)
 if "--fail" in args:
-    print("INTENTIONAL EXIT 7", flush=True)
+    print("INTENTIONAL FAILURE 7", flush=True)
     raise SystemExit(7)
 while True:
     report["count"] += 1
