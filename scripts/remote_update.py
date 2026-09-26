@@ -17,6 +17,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -43,9 +44,31 @@ def mac_proxy_port() -> str | None:
 
 def free_port(target: str) -> str | None:
     for port in CANDIDATE_PORTS:
-        listening = ssh(target, f"ss -ltn | grep -c ':{port} '", capture=True)
-        if listening.returncode == 0 and listening.stdout.strip() == "0":
+        # `|| true` because grep exits 1 when the count is zero, which is the answer
+        # we want here.
+        probe = ssh(target, f"ss -ltn 2>/dev/null | grep -c ':{port} ' || true", capture=True)
+        if probe.returncode == 0 and probe.stdout.strip() in ("0", ""):
             return str(port)
+    return None
+
+
+def open_tunnel(target: str, local_port: str, remote_port: str):
+    """Forward the remote port to this machine's proxy and hold the process, so the
+    tunnel lives exactly as long as the update and nothing is left behind."""
+    process = subprocess.Popen(
+        ["ssh", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes", "-o", "ConnectTimeout=10",
+         "-N", "-R", f"127.0.0.1:{remote_port}:127.0.0.1:{local_port}", target],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(20):
+        time.sleep(0.25)
+        if process.poll() is not None:
+            return None
+        check = ssh(target, f"curl -sL -x http://127.0.0.1:{remote_port} --max-time 8 "
+                            f"-o /dev/null -w '%{{http_code}}' https://github.com/4ier/4top",
+                    capture=True)
+        if check.stdout.strip().startswith(("2", "3")):
+            return process
+    process.terminate()
     return None
 
 
@@ -71,23 +94,37 @@ def main() -> int:
     target, command = host.ssh, host.command
     before = remote_doctor(target, command).get("revision")
 
-    port = None
-    if not args.no_tunnel and (port := free_port(target)) and (proxy_port := mac_proxy_port()):
-        opened = ssh("-f", "-N", "-o", "ExitOnForwardFailure=yes",
-                     "-R", f"127.0.0.1:{port}:127.0.0.1:{proxy_port}", target)
-        if opened.returncode != 0:
-            print(f"warning: could not open a tunnel on {target}:{port}; using the host's own egress",
-                  file=sys.stderr)
-            port = None
-
     updater = str(Path(command).parent / "4top-update")
-    prefix = f"FOURTOP_PROXY=http://127.0.0.1:{port} " if port else ""
-    result = ssh(target, f"{prefix}{updater} {args.rev}", capture=True, timeout=600)
+    result = ssh(target, f"{updater} {args.rev}", capture=True, timeout=600)
+    tunnel = None
+    if result.returncode != 0 and not args.no_tunnel:
+        # The host's own egress failed. Lend it this machine's, on a free port, for
+        # exactly as long as the update takes.
+        port, proxy_port = free_port(target), mac_proxy_port()
+        if port and proxy_port:
+            tunnel = open_tunnel(target, proxy_port, port)
+        if tunnel is None:
+            sys.stdout.write(result.stdout)
+            sys.stderr.write(result.stderr)
+            print(f"\n{target} could not update: neither its own egress nor a tunnel from this "
+                  f"machine worked. Check this machine's proxy, or pass FOURTOP_PROXY explicitly.",
+                  file=sys.stderr)
+            return result.returncode
+        # Say why the host could not do it itself; "fell back to a tunnel" on its own
+        # hides an unreliable proxy that is worth knowing about.
+        reason = next((line.strip() for line in reversed(
+            (result.stderr + result.stdout).splitlines()) if line.strip()), "unknown reason")
+        print(f"{target}: its own egress failed ({reason}); lending this machine's proxy "
+              f"(127.0.0.1:{proxy_port}) through a tunnel on port {port}", file=sys.stderr)
+        try:
+            result = ssh(target, f"FOURTOP_PROXY=http://127.0.0.1:{port} {updater} {args.rev}",
+                         capture=True, timeout=600)
+        finally:
+            tunnel.terminate()
     sys.stdout.write(result.stdout)
     sys.stderr.write(result.stderr)
     if result.returncode != 0:
-        print(f"\n{target} could not update. Check its own egress, then retry without a tunnel "
-              f"or pass FOURTOP_PROXY explicitly.", file=sys.stderr)
+        print(f"\n{target} could not update.", file=sys.stderr)
         return result.returncode
 
     after = remote_doctor(target, command).get("revision")

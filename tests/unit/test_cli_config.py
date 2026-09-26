@@ -229,3 +229,14 @@ def test_a_revision_mismatch_between_machines_is_reported(lab, monkeypatch):
         manager.close()
     assert report["revision"], "this checkout reports its own revision"
     assert any("scripts/remote_update.py venus" in issue for issue in report["issues"]), report["issues"]
+
+
+def test_the_remote_update_helper_is_importable_and_documented():
+    # It is a tool script, so this only guards the parts other code depends on: the
+    # module imports cleanly and the docs the gate checks name it.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("remote_update", SRC.parent / "scripts" / "remote_update.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.CANDIDATE_PORTS and all(port > 1024 for port in module.CANDIDATE_PORTS)
+    assert module.mac_proxy_port()

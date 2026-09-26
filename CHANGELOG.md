@@ -67,9 +67,11 @@ terminal multiplexer of its own.
 - `doctor` reports the `revision` of the code it is running, and `--host NAME doctor`
   reports both, so two machines on different revisions is visible instead of turning
   into a confusing error later.
-- `scripts/remote_update.py NAME` brings a remote's 4top forward. It tries the host's
-  own egress first and falls back to a reverse tunnel from this machine, so a host
-  whose proxy is down can still update without reconfiguring anything on it.
+- `scripts/remote_update.py NAME` brings a remote's 4top forward. It uses the host's
+  own egress first and, only if that fails, lends this machine's proxy through a
+  reverse tunnel that lives exactly as long as the update. Both hosts were observed
+  with a proxy that answers on one port and fails on another, or works and then stops,
+  so the fallback is a real case and it says which one it used.
 - `scripts/check_docs.py` fails when the documentation stops describing the code,
   and runs in a pre-commit hook, the test suite and CI.
 
