@@ -51,6 +51,14 @@ def tracked_files() -> list[Path]:
             if path.is_file() and not any(part in SKIP_DIRS for part in path.parts)]
 
 
+def label(path: Path) -> str:
+    """A short name for a scanned file; tests may point the scanner outside the repo."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def invocations(text: str) -> list[list[str]]:
     """Command lines that claim to be `4top` invocations, not prose about 4top."""
     lines = []
@@ -88,7 +96,7 @@ def reported() -> list[str]:
         if not any(name in invocation for invocation in invocations(readme)):
             problems.append(f"README.md never shows `4top {name}`")
     for path, text in texts.items():
-        if path.suffix != ".md" or str(path.relative_to(ROOT)) in EXEMPT:
+        if path.suffix != ".md" or label(path) in EXEMPT:
             continue
         for invocation in invocations(text):
             words, index = invocation[1:], 0
@@ -102,7 +110,7 @@ def reported() -> list[str]:
                     continue
                 if word in known or word == "--":
                     break
-                problems.append(f"{path.relative_to(ROOT)}: `{' '.join(invocation)}` "
+                problems.append(f"{label(path)}: `{' '.join(invocation)}` "
                                 f"uses unknown command `{word}`")
                 break
 
@@ -130,11 +138,11 @@ def reported() -> list[str]:
             continue
         for target in re.findall(r"\]\((?!https?:|#)([^)]+)\)", text):
             if not (path.parent / target.split("#")[0]).exists():
-                problems.append(f"{path.relative_to(ROOT)}: link target {target} does not exist")
+                problems.append(f"{label(path)}: link target {target} does not exist")
 
     # No vocabulary from a design that no longer exists.
     for path, text in texts.items():
-        relative = str(path.relative_to(ROOT))
+        relative = label(path)
         if relative in EXEMPT or path.suffix not in (".md", ".py", ".toml", ".yml", ".yaml", ".in", ".cfg"):
             continue
         for word in SUPERSEDED:
