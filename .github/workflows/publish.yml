@@ -38,8 +38,10 @@ jobs:
         with: {persist-credentials: false}
       - uses: actions/setup-python@v5
         with: {python-version: '3.12'}
-      - name: Install the build frontend
-        run: python -m pip install --upgrade build
+      - name: Install the pinned build environment
+        # The same pinned set the suite was validated with, so --no-isolation has the
+        # backend it needs instead of failing with "Cannot import setuptools.build_meta".
+        run: python -m pip install -r requirements-dev.lock
       - name: Gate the release
         run: |
           tag=""
