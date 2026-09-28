@@ -160,6 +160,28 @@ of failing during the hand-over, where the message would be painted over. The ss
 connection also keeps a liveness probe, so a link that dies becomes an error rather
 than a hang, and the session stays in its transcript to be resumed again.
 
+### E2B sandboxes
+
+An [E2B](https://e2b.dev) sandbox is a throwaway cloud machine that pauses when idle
+and keeps its processes while paused. 4top reaches it over ssh like any host, through
+the sandbox's websocket port, so this machine needs `websocat`
+(`brew install websocat`, or `pkg install websocat` in Termux).
+
+```sh
+contrib/e2b/new scratch        # create one from the 4top template; prints the entry
+```
+
+```toml
+[hosts.scratch]
+e2b = "SANDBOX_ID"
+```
+
+A paused sandbox shows its last rows marked `paused`, and refreshing never wakes it.
+Enter, preview or search wakes it (about a second). While one of its agents is open,
+the panel keeps it awake; ten minutes after the last one closes, it pauses again.
+The API key is `E2B_API_KEY`, or the project `e2b auth login` selected. The template
+and the design are in [contrib/e2b](contrib/e2b) and [docs/e2b-design.md](docs/e2b-design.md).
+
 ## Command line
 
 ```sh

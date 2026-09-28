@@ -540,8 +540,18 @@ class FourtopApp(App[tuple | None]):
             self._history_loading = False
 
     async def refresh_rows(self):
-        await asyncio.gather(*(self._refresh(source, render=False) for source in self.sources))
+        await asyncio.gather(*(self._refresh(source, render=False) for source in self.sources),
+                             *(self._keep_awake(source) for source in self.sources))
         self.render_list()
+
+    async def _keep_awake(self, source: Source):
+        """A sandbox with an agent open here must not pause under it."""
+        keep = getattr(source.manager, "keep_awake", None)
+        if keep and any(tag.startswith(source.name + ":") for tag in self.opened):
+            try:
+                await asyncio.to_thread(keep)
+            except FourtopError as exc:
+                self.set_status(str(exc))
 
     async def _refresh(self, source: Source, render: bool = True):
         if source.refreshing or self._fourtop_closing:
@@ -721,6 +731,8 @@ class FourtopApp(App[tuple | None]):
             left.append(" · unreachable", "bold red")
         elif not source.loaded or source.refreshing and not source.snapshot.rows:
             left.append(" · loading", "dim italic")
+        elif source.snapshot.paused:
+            left.append(" · paused", "dim italic")
         elif source.snapshot.cached:
             left.append(" · cached", "dim italic")
         if source.snapshot.issues:

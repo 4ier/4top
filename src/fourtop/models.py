@@ -84,3 +84,4 @@ class Snapshot:
     observed_at: str = field(default_factory=utc_now)
     scope: str = "local"
     cached: bool = False  # rows from the last visit, shown while the host is asked again
+    paused: bool = False  # a sandbox asleep: its last rows, and it was not woken to ask

@@ -111,6 +111,26 @@ ssh = "me@build-box"                 # 任意 ssh 目标，包括 tailnet 名称
 （ControlMaster）让刷新保持廉价，BatchMode 让缺少密钥时快速失败而不是卡在提示上，
 行 schema 不一致的远端会被拒绝而不是部分解析。
 
+### E2B 沙箱
+
+[E2B](https://e2b.dev) 沙箱是一台用完即弃的云端机器，空闲时会暂停，暂停期间进程也保留。
+4top 像访问其他主机一样通过 ssh 连它，经由沙箱的 websocket 端口，所以本机需要 `websocat`
+（`brew install websocat`，Termux 里 `pkg install websocat`）。
+
+```sh
+contrib/e2b/new scratch        # 用 4top 模板新建一个沙箱，并打印配置条目
+```
+
+```toml
+[hosts.scratch]
+e2b = "SANDBOX_ID"
+```
+
+暂停的沙箱显示上次的会话并标为 `paused`，刷新永远不会唤醒它；Enter、预览或搜索会唤醒它（约一秒）。
+只要它的某个 agent 还在面板里开着，面板就会让它保持运行；最后一个关闭十分钟后，它会再次暂停。
+API key 取自 `E2B_API_KEY`，或 `e2b auth login` 选定的项目。模板和设计见
+[contrib/e2b](contrib/e2b) 和 [docs/e2b-design.md](docs/e2b-design.md)。
+
 ## 命令行
 
 ```sh

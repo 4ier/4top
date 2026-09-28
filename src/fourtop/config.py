@@ -14,6 +14,7 @@ from .errors import FourtopError
 
 ROOT_ENV = {"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR"}
 HOST_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+SANDBOX_ID_RE = re.compile(r"[a-z0-9]{1,64}\Z")
 
 
 def _absolute(value: str) -> Path:
@@ -44,6 +45,7 @@ class Host:
     refresh_seconds: float = 15.0
     timeout_seconds: float = 10.0
     ad_hoc: bool = False
+    e2b: str = ""  # an E2B sandbox ID; ssh then goes through its websocket
 
 
 def _host(name: str, options: dict, ad_hoc: bool = False) -> Host:
@@ -51,11 +53,17 @@ def _host(name: str, options: dict, ad_hoc: bool = False) -> Host:
         raise FourtopError("Host names must be short and start with a letter or digit", 2)
     if not isinstance(options, dict):
         raise FourtopError(f"[hosts.{name}] must be a TOML table", 2)
-    permitted = {"ssh", "command", "refresh_seconds", "timeout_seconds"}
+    permitted = {"ssh", "e2b", "command", "refresh_seconds", "timeout_seconds"}
     if set(options) - permitted:
         raise FourtopError(f"Unknown option in [hosts.{name}]: "
                            + ", ".join(sorted(set(options) - permitted)), 2)
-    target = options.get("ssh")
+    sandbox = options.get("e2b", "")
+    if "e2b" in options:
+        if "ssh" in options:
+            raise FourtopError(f"[hosts.{name}] takes ssh or e2b, not both", 2)
+        if not isinstance(sandbox, str) or not SANDBOX_ID_RE.match(sandbox):
+            raise FourtopError(f"Invalid hosts.{name}.e2b; expected a sandbox ID", 2)
+    target = options.get("ssh", f"user@{sandbox}" if sandbox else None)
     # A leading dash would be read as an ssh option, and whitespace cannot be an
     # argv element on the remote. Both are refused rather than quoted and guessed.
     if (not isinstance(target, str) or not target or "\x00" in target or target.startswith("-")
@@ -67,7 +75,7 @@ def _host(name: str, options: dict, ad_hoc: bool = False) -> Host:
         raise FourtopError(f"Invalid hosts.{name}.command; expected one executable path", 2)
     return Host(name, target, command,
                 _number(options, "refresh_seconds", 15.0, 1.0),
-                _number(options, "timeout_seconds", 10.0, 0.1), ad_hoc)
+                _number(options, "timeout_seconds", 10.0, 0.1), ad_hoc, sandbox)
 
 
 @dataclass

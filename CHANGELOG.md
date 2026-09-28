@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- E2B sandboxes as hosts: `[hosts.NAME] e2b = "SANDBOX_ID"` reaches a sandbox over
+  ssh through its websocket (`websocat` as ProxyCommand), so listing, preview,
+  preflight, resume and the tmux layout work unchanged. Refreshing never wakes a
+  paused sandbox (it shows its last rows as `paused`); an action wakes it, and an
+  open agent keeps it awake. `contrib/e2b` holds the template and `new`, which
+  creates a tagged, auto-pausing sandbox signed in with this machine's credentials.
+  Verified against a real sandbox: new Claude session, pause, resume by key.
+
 - One tap on a touch screen still opened a session: Textual runs OptionList's own
   click handler after an override unless the default is prevented. It is now, and a
   touch that Termux reports twice within 120 ms counts once. Found on the tablet;

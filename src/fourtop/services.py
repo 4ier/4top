@@ -5,6 +5,7 @@ a terminal or a multiplexer, so nothing here tracks liveness.
 """
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import os
 import subprocess
@@ -24,6 +25,7 @@ from session_ls.api import (
     utc_now,
 )
 
+from . import e2b
 from .agents import Drivers
 from .config import Config, Host
 from .errors import Conflict, FourtopError, Missing
@@ -96,6 +98,7 @@ class Manager:
                                   identity=f"{host.ssh}\n{host.command}")
             self._remote = Snapshot([], scope=host.name)
             self._remote_at = 0.0
+            self._kept_at = 0.0
             if self.sync.load():
                 self._remote = Snapshot(rows_of(host, self.sync.payloads.values()),
                                         scope=host.name, cached=True)
@@ -115,6 +118,18 @@ class Manager:
         """Rows from the last visit to this host, if any, to show while it is asked again."""
         return self._remote if self.host is not None and self._remote.cached else None
 
+    def wake(self) -> None:
+        """An action the user asked for wakes a sandbox; only refreshing leaves it asleep."""
+        if self.host is not None and self.host.e2b:
+            e2b.wake(self.config, self.host)
+            self._kept_at = time.monotonic()
+
+    def keep_awake(self) -> None:
+        """Called while one of the sandbox's agents is open, so it does not pause under
+        the agent. Asked at most once a minute; the deadline is minutes away."""
+        if self.host is not None and self.host.e2b and time.monotonic() - self._kept_at >= 60:
+            self.wake()
+
     def history(self, force=False) -> ScanResult:
         with self._history_lock:
             if force or time.monotonic() - self._history_at >= self.config.history_refresh_seconds:
@@ -131,7 +146,10 @@ class Manager:
                 # A failure waits for the next interval too, instead of retrying on
                 # every tick of the panel.
                 self._remote_at = now
-                self._remote = remote_snapshot(self.config, self.host, self.sync)
+                if self.host.e2b and e2b.state(self.config, self.host) == "paused":
+                    self._remote = dataclasses.replace(self._remote, paused=True)
+                else:
+                    self._remote = remote_snapshot(self.config, self.host, self.sync)
             return self._remote
         history = self.history() if load_history else self._history
         # The panel asks every second; rows are rebuilt only when the scan changed.
@@ -142,6 +160,10 @@ class Manager:
 
     def search(self, query: str, full=False, cancel=None) -> Snapshot:
         if self.host is not None:
+            if self._remote.paused and not full:
+                return Snapshot(slice_rows(self._remote.rows, query), scope=self.host.name,
+                                cached=True, paused=True)
+            self.wake()
             return remote_search(self.config, self.host, query, full)
         snapshot = self.snapshot()
         if full:
@@ -166,6 +188,7 @@ class Manager:
 
     def preview(self, row: Session, cursor: int = 0):
         if self.host is not None:
+            self.wake()
             return f"{row.agent} · {row.host} (read-only)", \
                 clean_text(remote_preview(self.config, self.host, row.key, cursor), multiline=True)[:2**18], None
         if row.record is None:
@@ -187,6 +210,7 @@ class Manager:
         conversation is, and pages backwards.
         """
         if self.host is not None:
+            self.wake()
             return remote_preview_tail(self.config, self.host, row, before)
         if row.record is None:
             row = self.resolve_row(row.key)
@@ -217,6 +241,7 @@ class Manager:
         repaints immediately afterwards, which reads as "nothing happened".
         """
         if self.host is not None:
+            self.wake()
             return remote_check(self.config, self.host, query)
         record = self.resolve_history(query)
         executable, reason = None, None
@@ -261,6 +286,7 @@ class Manager:
     def remote_argv(self, args: list[str]) -> list[str]:
         if self.host is None:
             raise Missing("This is the local view; no remote command applies")
+        self.wake()
         return ssh_argv(self.config, self.host, args, tty=True)
 
     def run(self, plan: LaunchPlan) -> int:

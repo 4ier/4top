@@ -14,6 +14,7 @@ from session_ls.api import clean_text
 from session_ls.storage import StorageError, private_dir
 
 from .config import Config, Host
+from .e2b import PROXY
 from .errors import Unavailable
 from .models import ROW_SCHEMA, Session, Snapshot
 from .sync import SYNC_VERSION, SyncState, digest, fingerprint
@@ -62,6 +63,10 @@ def ssh_argv(config: Config, host: Host, args: list[str], *, tty: bool = False) 
     """Build one local argv. ssh hands the last element to a remote shell, so every
     remote argument is quoted for that shell rather than trusted as a literal."""
     options = [*SSH_OPTIONS, "-o", f"ConnectTimeout={max(1, int(host.timeout_seconds))}"]
+    if host.e2b:
+        # Every sandbox is a new host name with the template's host key, and the
+        # first question about it must not be a prompt that BatchMode refuses.
+        options += ["-o", f"ProxyCommand={PROXY}", "-o", "StrictHostKeyChecking=accept-new"]
     directory = control_dir(config)
     if tty:
         # An agent gets a connection of its own. Multiplexed over the panel's
