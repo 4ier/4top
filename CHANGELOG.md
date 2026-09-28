@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- `contrib/termux/route` no longer closes quiet sessions after five seconds: netcat's
+  `-w` is an idle timeout as well, and the previous release used it on the
+  connection itself. Reachability is now probed with it and the connection is made
+  without it. Found on the tablet: a remote pi exited 255 eight seconds after opening.
+
 - Rows say what each session is doing: `⟳ working`, `▶ your turn`, or `✗ stopped`
   (mid-turn but silent for ten minutes), for sessions active in the last day. A
   third line shows the latest request when it differs from the first, and the git
