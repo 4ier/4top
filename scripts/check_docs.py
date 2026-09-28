@@ -140,6 +140,16 @@ def reported() -> list[str]:
             if not (path.parent / target.split("#")[0]).exists():
                 problems.append(f"{label(path)}: link target {target} does not exist")
 
+    # Paths that commands pass from the checkout root exist. The install line kept
+    # `./packages/session-ls` for months after that directory left the repository.
+    for path, text in texts.items():
+        if path.suffix != ".md":
+            continue
+        for block in re.findall(r"```[a-z]*\n(.*?)```", text, re.DOTALL):
+            for target in re.findall(r"(?<![\w.])\./[\w./-]+", block):
+                if not (ROOT / target).exists():
+                    problems.append(f"{label(path)}: command path {target} does not exist")
+
     # No vocabulary from a design that no longer exists.
     for path, text in texts.items():
         relative = label(path)

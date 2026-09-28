@@ -13,7 +13,7 @@ kept in this tree. Raw records for older runs are in git history.
 
 ## Run the isolated suite
 
-Install both packages and the exact development dependencies from the repository,
+Install the package and the exact development dependencies from the repository,
 then run:
 
 ```sh
@@ -30,8 +30,8 @@ fixtures; they do not connect to models, use credentials, read real HOME stores,
 or reach a network.
 
 `verify_install.py` uses a **new virtual environment**, not an editable checkout.
-It installs both wheels, validates commands and isolated demo output, checks the
-old CLI, and ensures the 4top wheel does not vendor the session-ls namespace.
+It installs the 4top wheel with session-ls from PyPI, validates commands and
+isolated demo output, checks the old CLI, and ensures the 4top wheel does not vendor the session-ls namespace.
 
 For an offline test, pip's standard `PIP_NO_INDEX` and `PIP_FIND_LINKS` environment
 variables can point to an independently downloaded wheel cache. No dependency

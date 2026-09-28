@@ -65,6 +65,15 @@ def test_the_checker_notices_removed_vocabulary(tmp_path, monkeypatch):
     assert any("removed vocabulary" in problem for problem in problems), problems
 
 
+def test_the_checker_notices_a_command_path_that_does_not_exist(tmp_path, monkeypatch):
+    checker = load_checker()
+    stale = tmp_path / "docs.md"
+    stale.write_text("```sh\npip install ./packages/session-ls ./src .\n```\n", encoding="utf-8")
+    monkeypatch.setattr(checker, "tracked_files", lambda: [stale])
+    problems = [p for p in checker.reported() if "command path" in p]
+    assert problems == [f"{stale}: command path ./packages/session-ls does not exist"], problems
+
+
 def test_the_checker_explains_itself_without_the_project_environment():
     # The hook may fall back to a bare interpreter; that must not look like a crash.
     result = subprocess.run([sys.executable, "-S", str(ROOT / "scripts" / "check_docs.py")],

@@ -23,7 +23,7 @@
 git clone https://github.com/4ier/4top.git
 cd 4top
 python3 -m venv .venv
-.venv/bin/python -m pip install ./packages/session-ls .
+.venv/bin/python -m pip install .
 .venv/bin/4top --demo
 . .venv/bin/activate
 4top                       # 浏览本机全部会话

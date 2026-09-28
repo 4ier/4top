@@ -26,7 +26,7 @@ tool. Otherwise a previously installed copy keeps running older code, which look
 like a bug in the change you just made.
 
 ```sh
-uv tool install --force --editable .   # both packages stay live
+uv tool install --force --editable .   # edits take effect without reinstalling
 ```
 
 No multiplexer is required. `tests/integration` starts real fake agents as real
@@ -67,7 +67,7 @@ before anything is uploaded.
    picks up as a dependency.
 2. Check locally: `python scripts/check_release.py v<version>`.
 3. Tag and push: `git tag v<version> && git push origin v<version>`.
-4. CI runs the suite, gates the release, builds both wheels, installs them into a
+4. CI runs the suite, gates the release, builds the wheel, installs it into a
    fresh virtual environment, publishes `4top`, and opens the GitHub release.
 
 The gate is what stops the release that cannot work: the root wheel requires
