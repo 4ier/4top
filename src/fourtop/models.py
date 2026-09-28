@@ -8,6 +8,10 @@ from typing import Any
 from session_ls.api import HistoryRecord, utc_now
 
 ROW_SCHEMA = 2
+# A title is the first prompt, and a pasted prompt can be 100 KB. The panel shows one
+# line of it, and a remote panel fetches every row on every refresh, so JSON rows
+# carry a bounded title; metadata search still sees the whole one on its own host.
+TITLE_LIMIT = 200
 
 
 def age(value: str) -> str:
@@ -64,6 +68,8 @@ class Session:
         result = asdict(self)
         result.pop("record")
         result["problems"] = list(self.problems)
+        if len(self.title) > TITLE_LIMIT:
+            result["title"] = self.title[:TITLE_LIMIT - 1] + "…"
         result["schema_version"] = ROW_SCHEMA
         return result
 

@@ -7,7 +7,7 @@ import pytest
 from fourtop.config import Config
 from fourtop.errors import Unavailable
 from fourtop.hosts import parse_rows, remote_search, remote_snapshot, ssh_argv
-from fourtop.models import ROW_SCHEMA, Session
+from fourtop.models import ROW_SCHEMA, TITLE_LIMIT, Session
 
 FAKE_SSH = '''#!{python}
 import json, os, sys
@@ -354,3 +354,22 @@ def test_nowhere_short_enough_still_runs_ssh(tmp_path):
     assert "ControlPath" not in " ".join(argv)
     assert "ControlMaster" not in " ".join(argv)
     assert "BatchMode=yes" in argv
+
+
+def test_a_pasted_prompt_does_not_travel_with_every_refresh():
+    # A remote panel fetches every row on every refresh. A 100 KB pasted first
+    # prompt once made one host's `list --json` 15.8 MB, which a phone link could
+    # not deliver within the timeout.
+    pasted = "review this diff\n" + "x" * 100_000
+    row = Session("h_big", "codex", "/srv/app", pasted, "2026-09-24T00:00:00+00:00",
+                  "2026-09-25T00:00:00+00:00")
+    title = row.json()["title"]
+    assert len(title) == TITLE_LIMIT and title.startswith("review this diff") and title.endswith("…")
+    assert row.title == pasted  # search on the owning host still sees all of it
+    short = Session("h_s", "pi", "/srv", "fix retry", "2026-09-24T00:00:00+00:00", "")
+    assert short.json()["title"] == "fix retry"
+
+
+def test_remote_queries_ask_ssh_to_compress(lab):
+    argv = ssh_argv(lab.config, lab.config.resolve_host("me@venus"), ["list", "--json"])
+    assert "Compression=yes" in argv
