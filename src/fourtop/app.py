@@ -729,8 +729,13 @@ class FourtopApp(App[tuple | None]):
         foot = Text("    ")
         if busy:
             foot.append(busy + " · ", style="bold yellow")
-        foot.append(f"{row.agent} · {project(row.cwd)} · ", style="dim")
         recent = when(row.last)
+        tail = ("active now" if recent == "now" else recent) + (" · read-only" if not row.can_resume else "")
+        # The time is what matters most; a long project name gives way to it.
+        room = width - foot.cell_len - len(row.agent) - len(tail) - 6
+        name = Text(project(row.cwd))
+        name.truncate(max(4, room), overflow="ellipsis")
+        foot.append(f"{row.agent} · {name.plain} · ", style="dim")
         # Written in the last minute: probably open elsewhere (another terminal, a
         # desktop app), where a second copy may be read-only or collide with it.
         foot.append("active now" if recent == "now" else recent,
