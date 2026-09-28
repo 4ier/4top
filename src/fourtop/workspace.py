@@ -200,7 +200,13 @@ class Workspace:
             self.focus_panel()  # a narrow screen starts with the list alone
 
     def fit(self, width: int) -> None:
-        """Give the list a readable width and the agent the rest."""
+        """Give the list a readable width and the agent the rest.
+
+        Not while a pane is zoomed: resizing a pane unzooms its window in tmux, and
+        zooming the list (to read a preview) is itself the resize that calls this.
+        """
+        if self.run("display-message", "-p", "-t", self.panel, "#{window_zoomed_flag}").strip() == "1":
+            return
         if width >= NARROW:
             self.run("resize-pane", "-t", self.panel, "-x", str(max(40, min(60, width * 2 // 5))))
 
