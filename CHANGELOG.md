@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4top 0.2.0a7 — 2026-09-29
 
 - A preview opened in the layout now really takes the whole window: fitting the
   layout after the zoom resized a pane, which in tmux unzooms, so the zoom undid

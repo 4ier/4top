@@ -10,7 +10,7 @@ daemon, account, model calls, or telemetry.
 
 ![4top synthetic demo — no real user history](docs/demo/demo.svg)
 
-> **0.2.0a6 — alpha.** With tmux installed, 4top keeps its list beside the agents it
+> **0.2.0a7 — alpha.** With tmux installed, 4top keeps its list beside the agents it
 > opens; it records nothing about them and asks tmux what is open. Codex **0.155.1**
 > passed an authenticated exact-resume smoke check against an earlier build;
 > Claude Code, Pi and other native versions are not certified.
