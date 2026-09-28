@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- A remote panel no longer downloads every session's full first prompt on every
+  refresh. The title in a JSON row is capped at 200 characters; one Mac's
+  `list --json` was 15.8 MB because of a single 100 KB pasted prompt, and a tablet
+  on a mobile link timed out fetching it. Metadata search on the owning host still
+  sees the whole title.
+- Remote queries ask ssh for compression. With the cap, that host's rows went from
+  15.8 MB to about 0.3 MB on the wire.
+- The checkout install no longer names `./packages/session-ls`, which left the
+  repository with 0.2.0a2, and the docs gate now checks `./` paths in shell blocks.
+
+## 4top 0.2.0a4 — 2026-09-26
+
+- `4top check` now proves the agent can actually run here, not just that a path is
+  configured. It runs the same `--help` probe a resume would, and reports why the CLI
+  failed: the case that prompted this was a Mac whose `pi` and `codex` launchers need
+  `node` on `PATH`, which a non-interactive ssh session does not have, so the panel's
+  preflight passed and the resume then exited 5 with no explanation.
+- Document that an agent installed on a host can still be "not found" when that host's
+  4top is invoked over ssh, because a non-interactive session gets a minimal `PATH`.
+  The remedy is an absolute `[agents.NAME].executable` on that host, which is what the
+  error message already suggests.
+
 ## 4top 0.2.0a3 — 2026-09-26
 
 Get the ssh connection socket length right, measured rather than assumed.
@@ -10,21 +34,9 @@ Get the ssh connection socket length right, measured rather than assumed.
   is the fallback, and if neither fits, ssh runs without connection reuse instead of
   failing every host.
 
-## 4top 0.2.0a4 — 2026-09-26
+## 4top 0.2.0a2 — 2026-09-26
 
-- `4top check` now proves the agent can actually run here, not just that a path is
-  configured. It runs the same `--help` probe a resume would, and reports why the CLI
-  failed: the case that prompted this was a Mac whose `pi` and `codex` launchers need
-  `node` on `PATH`, which a non-interactive ssh session does not have, so the panel's
-  preflight passed and the resume then exited 5 with no explanation.
-
-## Unreleased
-
-- Document that an agent installed on a host can still be "not found" when that host's
-  4top is invoked over ssh, because a non-interactive session gets a minimal `PATH`.
-  The remedy is an absolute `[agents.NAME].executable` on that host, which is what the
-  error message already suggests.
-
+Fix the remote-host path on Android/Termux, which made every host unusable there.
 
 - Put the ssh connection socket somewhere short enough. Unix sockets have a hard
   path limit, and Termux on Android runs under
@@ -32,11 +44,6 @@ Get the ssh connection socket length right, measured rather than assumed.
   remote host failed with `unix_listener: path ... too long for Unix domain socket`.
   The socket now prefers the state directory, then the temporary directory, then
   `/tmp`.
-
-## 4top 0.2.0a2 — 2026-09-26
-
-Fix the remote-host path on Android/Termux, which made every host unusable there.
-
 - `session-ls` moved to its own repository
   ([4ier/session-ls](https://github.com/4ier/session-ls)), which is now the home of
   the parser package and the owner of its releases. This repository consumes it as

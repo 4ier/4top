@@ -18,9 +18,11 @@ from .errors import Unavailable
 from .models import ROW_SCHEMA, Session, Snapshot
 
 # BatchMode never prompts, and the ServerAlive pair turns a dead link into an error in
-# about 45 seconds instead of a hang.
+# about 45 seconds instead of a hang. Rows are repetitive JSON fetched on every refresh,
+# often over a phone's metered link, and compress several times over.
 SSH_OPTIONS = ("-o", "BatchMode=yes", "-o", "ServerAliveInterval=15",
-               "-o", "ServerAliveCountMax=3", "-o", "TCPKeepAlive=yes")
+               "-o", "ServerAliveCountMax=3", "-o", "TCPKeepAlive=yes",
+               "-o", "Compression=yes")
 # Reusing one warm connection saves a handshake per refresh, but the socket has to fit.
 SSH_MULTIPLEX = ("-o", "ControlMaster=auto", "-o", "ControlPersist=60")
 
