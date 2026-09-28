@@ -49,7 +49,8 @@ uses as its `ProxyCommand`. The files are in [`contrib/termux`](../contrib/termu
 
 4. **Route ssh through it.** Install `route` as `~/.ssh/route`. It uses tailscaled
    whenever that is running, which also finds the LAN path at home, and falls back
-   to the LAN address when it is not. A machine that is not on the tailnet is
+   to the LAN address when it is not, or when the tailnet path fails before a
+   connection is made (a host behind a jump host that is asleep, for instance). A machine that is not on the tailnet is
    reached through one that is:
 
    ```
