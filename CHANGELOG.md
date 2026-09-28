@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A preview opened in the layout now really takes the whole window: fitting the
+  layout after the zoom resized a pane, which in tmux unzooms, so the zoom undid
+  itself. Found on the tablet.
+
 - `contrib/termux/route` no longer closes quiet sessions after five seconds: netcat's
   `-w` is an idle timeout as well, and the previous release used it on the
   connection itself. Reachability is now probed with it and the connection is made

@@ -98,3 +98,18 @@ def test_placeholders_never_pile_up(layout, tmp_path):
         return out.split().count("1")
     assert placeholders() == 1
     assert stage_key(tmux, env, workspace.panel) == ""
+
+
+def test_fitting_the_layout_leaves_a_zoomed_list_zoomed(layout):
+    # Zooming the list to read a preview resizes the panel, whose resize handler
+    # fits the layout; in tmux any pane resize unzooms, so the zoom undid itself.
+    workspace, tmux, env = layout
+    workspace.zoom_panel(True)
+    workspace.fit(160)
+
+    def zoomed():
+        return subprocess.run([*tmux, "display", "-p", "-t", workspace.panel, "#{window_zoomed_flag}"],
+                              capture_output=True, text=True, env=env).stdout.strip()
+    assert zoomed() == "1"
+    workspace.zoom_panel(False)
+    assert zoomed() == "0"
