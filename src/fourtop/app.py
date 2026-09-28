@@ -40,6 +40,16 @@ def project(cwd: str) -> str:
     return Path(cwd).name or cwd or "?"
 
 
+AWAY_REFRESH = 60.0
+
+
+def when(last: str) -> str:
+    """How long ago, as the list shows it: "now" for the last minute, so a busy
+    session does not repaint the list every second."""
+    label = age(last)
+    return "now" if label.endswith("s") and label[:-1].isdigit() else label
+
+
 def first_line(title: str) -> str:
     return " ".join(clean_text(title or "").split())
 
@@ -307,8 +317,22 @@ class ProjectPicker(ModalScreen[str | None]):
 
 
 class SessionList(OptionList):
-    """The list itself. Only the wheel is changed: it moves the highlight, so Enter
-    never acts on a row that has scrolled out of view."""
+    """The list itself, with two changes for touch screens and wheels.
+
+    A tap on another row only selects it; tapping the selected row opens it. On a
+    phone a tap is how you select, and opening on the first touch started sessions
+    nobody meant to open. The wheel moves the highlight, so Enter never acts on a
+    row that has scrolled out of view.
+    """
+
+    async def _on_click(self, event) -> None:
+        clicked = event.style.meta.get("option")
+        if clicked is None or self._options[clicked].disabled:
+            return
+        if clicked != self.highlighted:
+            self.highlighted = clicked
+            return
+        self.action_select()
 
     def _on_mouse_scroll_down(self, event) -> None:
         event.stop()
@@ -362,6 +386,9 @@ class FourtopApp(App[tuple | None]):
     #list:focus { border: none; }
     #list > .option-list--option-highlighted { background: $primary 30%; text-style: none; }
     #list:focus > .option-list--option-highlighted { background: $primary 45%; }
+    #list > .option-list--option-disabled { color: $text; }
+    Screen.-away #list > .option-list--option-highlighted { background: $panel; }
+    Screen.-away #keys { background: $warning 25%; color: $text; }
     #status { height: auto; max-height: 2; padding: 0 1; color: $warning; }
     #keys { height: 1; padding: 0 1; color: $text-muted; background: $boost; }
     ModalScreen { align: center middle; background: $background 70%; }
@@ -396,6 +423,7 @@ class FourtopApp(App[tuple | None]):
         self.project_filter: str | None = None
         self.show_subagents = False
         self.update_notice = None
+        self._away = False
         self.opened: dict[str, object] = {}  # tag -> tmux pane, as tmux reports it
         self.busy: dict[str, str] = {}  # tag -> what is happening to it right now
         self._signature = None
@@ -437,7 +465,7 @@ class FourtopApp(App[tuple | None]):
         if self.workspace:
             with contextlib.suppress(FourtopError):
                 await asyncio.to_thread(self.workspace.ensure_layout, self.size.width)
-            self.set_interval(1.0, self.poll_workspace)
+            self.set_interval(2.0, self.poll_workspace)
         for source in self.sources:
             cached = getattr(source.manager, "cached_snapshot", lambda: None)()
             if cached is not None:
@@ -461,10 +489,25 @@ class FourtopApp(App[tuple | None]):
 
     def on_resize(self, event):
         if self.is_mounted:
+            # The list learns its new width only after this event, and rows cut to
+            # the old width wrap in the meantime; lay them out once it is known.
             self._signature = None
-            self.render_list()
+            self.call_after_refresh(self.render_list)
             if self.workspace:
                 self.run_worker(asyncio.to_thread(self.workspace.fit, event.size.width))
+
+    def on_app_blur(self, event) -> None:
+        """The agent beside the list has the keyboard: say so, and dim the selection,
+        so typing is never mistaken for typing into the list."""
+        self.screen.add_class("-away")
+        self._away = True
+        self._render_chrome(max(20, self.query_one("#list", OptionList).size.width - 2))
+
+    def on_app_focus(self, event) -> None:
+        self.screen.remove_class("-away")
+        self._away = False
+        self.run_worker(self.refresh_rows())
+        self._render_chrome(max(20, self.query_one("#list", OptionList).size.width - 2))
 
     def _local(self) -> Source | None:
         return next((s for s in self.sources if not s.manager.remote and not s.manager.demo), None)
@@ -485,15 +528,24 @@ class FourtopApp(App[tuple | None]):
             self._history_loading = False
 
     async def refresh_rows(self):
-        await asyncio.gather(*(self._refresh(source) for source in self.sources))
+        await asyncio.gather(*(self._refresh(source, render=False) for source in self.sources))
+        self.render_list()
 
-    async def _refresh(self, source: Source):
+    async def _refresh(self, source: Source, render: bool = True):
         if source.refreshing or self._fourtop_closing:
             return
-        source.refreshing = True
         manager = source.manager
+        # While the agent beside the list has the keyboard, nobody is reading the
+        # list: remote hosts are asked a quarter as often, and caught up on return.
+        due = getattr(manager, "due", lambda at_least=0: True)(AWAY_REFRESH if self._away else 0)
+        if source.loaded and not due:
+            return  # a host between its refreshes: nothing to ask, nothing to repaint
+        source.refreshing = True
         try:
-            snapshot = await asyncio.to_thread(manager.snapshot, False)
+            if manager.remote:
+                snapshot = await asyncio.to_thread(manager.snapshot, False)
+            else:
+                snapshot = manager.snapshot(False)  # rows are cached; a thread costs more
             if source not in self.sources or self._fourtop_closing:
                 return
             source.snapshot, source.loaded, source.stale = snapshot, True, ""
@@ -504,14 +556,14 @@ class FourtopApp(App[tuple | None]):
             source.stale, source.loaded = clean_text(str(exc)), True
         finally:
             source.refreshing = False
-        self.render_list()
+        if render:
+            self.render_list()
 
     async def poll_workspace(self):
         if not self.workspace or self._fourtop_closing:
             return
         try:
-            ended = await asyncio.to_thread(self.workspace.reap)
-            panes = await asyncio.to_thread(self.workspace.panes)
+            panes, ended = await asyncio.to_thread(self.workspace.poll)
         except FourtopError as exc:
             self.set_status(str(exc))
             return
@@ -583,21 +635,23 @@ class FourtopApp(App[tuple | None]):
         return self.page_sizes({i: self._visible(s) for i, s in enumerate(self.sources)})[index]
 
     def render_list(self):
+        """Rebuild the list only when what it shows has changed.
+
+        This runs on every refresh tick, so the comparison is made on plain values
+        first; the styled rows are built only for a list that is actually new.
+        """
         if self._fourtop_closing or not self.is_mounted:
             return
         listing = self.query_one("#list", OptionList)
         width = max(20, (listing.size.width or self.size.width) - 2)
         every = {index: self._visible(source) for index, source in enumerate(self.sources)}
         sizes = self.page_sizes(every)
-        options, rows, signature = [], {}, [width, tuple(sizes.items()), tuple(self.opened),
-                                            tuple(self.busy.items())]
+        layout, rows = [], {}
         for index, source in enumerate(self.sources):
             visible, size = every[index], sizes[index]
             pages = max(1, -(-len(visible) // size))
             source.page = min(source.page, pages - 1)
-            header = self._header(source, len(visible), pages, width)
-            options.append(Option(header, id=f"h:{index}", disabled=True))
-            signature.append((header.plain, source.collapsed))
+            layout.append(("h", index, self._header(source, len(visible), pages, width)))
             if source.collapsed:
                 continue
             page = visible[source.page * size:(source.page + 1) * size]
@@ -606,18 +660,28 @@ class FourtopApp(App[tuple | None]):
             if not page:
                 note = ("loading…" if not source.loaded else
                         "no match" if len(source.snapshot.rows) else "no sessions")
-                options.append(Option(Text("   " + note, style="dim italic"), id=f"e:{index}",
-                                      disabled=True))
-                signature.append(note)
+                layout.append(("e", index, note))
             for row in page:
                 tag = f"{source.name}:{row.key}"
                 rows[tag] = (source, row)
-                options.append(Option(self._row(row, tag, width), id=tag))
-                signature.append((tag, row.title, row.last, row.cwd, row.agent, row.can_resume))
-        signature = tuple(signature)
+                layout.append(("r", tag, row))
         self._rows = rows
+        signature = (width, tuple(
+            (kind, key, value.plain) if kind == "h" else (kind, key, value) if kind == "e" else
+            (kind, key, value.title, when(value.last), value.cwd, value.agent, value.can_resume,
+             key in self.opened, self.busy.get(key))
+            for kind, key, value in layout))
         if signature != self._signature:
             self._signature = signature
+            options = []
+            for kind, key, value in layout:
+                if kind == "h":
+                    options.append(Option(value, id=f"h:{key}", disabled=True))
+                elif kind == "e":
+                    options.append(Option(Text("   " + value, style="dim italic"), id=f"e:{key}",
+                                          disabled=True))
+                else:
+                    options.append(Option(self._row(value, key, width), id=key))
             highlighted = listing.highlighted
             listing.clear_options()
             listing.add_options(options)
@@ -661,14 +725,18 @@ class FourtopApp(App[tuple | None]):
         head.append("● " if opened else "  ", style="bold green")
         head.append(title or "(untitled)", style="bold" if opened else "" if title else "dim italic")
         head.truncate(width, overflow="ellipsis")
-        meta = [row.agent, project(row.cwd), age(row.last)]
-        if not row.can_resume:
-            meta.append("read-only")
         busy = self.busy.get(tag)
         foot = Text("    ")
         if busy:
             foot.append(busy + " · ", style="bold yellow")
-        foot.append(" · ".join(meta), style="dim")
+        foot.append(f"{row.agent} · {project(row.cwd)} · ", style="dim")
+        recent = when(row.last)
+        # Written in the last minute: probably open elsewhere (another terminal, a
+        # desktop app), where a second copy may be read-only or collide with it.
+        foot.append("active now" if recent == "now" else recent,
+                    style="bold yellow" if recent == "now" else "dim")
+        if not row.can_resume:
+            foot.append(" · read-only", style="dim")
         foot.truncate(width, overflow="ellipsis")
         return Text("\n").join([head, foot])
 
@@ -696,20 +764,26 @@ class FourtopApp(App[tuple | None]):
             top.append("  ↑ " + self.update_notice.text(), style="bold magenta")
         top.truncate(width, overflow="ellipsis")
         self.query_one("#top", Static).update(top)
-        keys = ["⏎ open", "/ search", "p project", "space preview", "[ ] page", "n new"]
-        if self.workspace:
-            keys.insert(1, "→ agent")
-            keys.append("q detach")
+        if self._away:
+            self.query_one("#keys", Static).update(Text(
+                "typing goes to the agent · Alt-← or tap here for the list"[:width]))
+            keys = None
         else:
-            keys.append("q quit")
-        keys.append("? help")
-        line, used = [], 0
-        for item in keys:
-            if used + len(item) + 3 > width:
-                break
-            line.append(item)
-            used += len(item) + 3
-        self.query_one("#keys", Static).update(Text("   ".join(line)))
+            keys = ["⏎ open", "/ search", "p project", "space preview", "[ ] page", "n new"]
+        if keys is not None:
+            if self.workspace:
+                keys.insert(1, "→ agent")
+                keys.append("q detach")
+            else:
+                keys.append("q quit")
+            keys.append("? help")
+            line, used = [], 0
+            for item in keys:
+                if used + len(item) + 3 > width:
+                    break
+                line.append(item)
+                used += len(item) + 3
+            self.query_one("#keys", Static).update(Text("   ".join(line)))
         message = self._status_message
         if not message:
             issues = [f"{s.name}: {s.stale}" for s in self.sources if s.stale]

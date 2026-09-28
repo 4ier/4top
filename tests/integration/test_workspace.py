@@ -64,3 +64,21 @@ def test_the_environment_reaches_the_agent(layout, tmp_path):
     while not out.exists() and time.monotonic() < deadline:
         time.sleep(.05)
     assert out.read_text().strip() == "/custom/codex"
+
+
+def test_a_layout_that_outlived_its_list_gets_the_list_back(layout, tmp_path):
+    from fourtop.workspace import revive
+    workspace, tmux, env = layout
+    workspace.open("local:a", ["sh", "-c", "sleep 600"], str(tmp_path), {}, "a")
+    subprocess.run([*tmux, "respawn-pane", "-k", "-t", workspace.panel, "true"], env=env)
+    deadline = time.monotonic() + 5
+
+    def dead():
+        return subprocess.run([*tmux, "display", "-p", "-t", workspace.panel, "#{pane_dead}"],
+                              capture_output=True, text=True, env=env).stdout.strip()
+    while dead() != "1" and time.monotonic() < deadline:
+        time.sleep(.05)
+    assert dead() == "1", "the list exited and its pane was kept"
+    revive("tmux", env["FOURTOP_TMUX_SOCKET"], ["sh", "-c", "sleep 600"], env)
+    assert dead() == "0", "the list runs again in the same place"
+    assert "local:a" in workspace.panes(), "the agent was never touched"

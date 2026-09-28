@@ -104,6 +104,13 @@ class Manager:
     def scope(self) -> str:
         return "local" if self.host is None else self.host.name
 
+    def due(self, at_least: float = 0.0) -> bool:
+        """Whether the next snapshot would ask the host again (always cheap locally).
+        ``at_least`` stretches the interval, e.g. while nobody is looking."""
+        if self.host is None:
+            return True
+        return time.monotonic() - self._remote_at >= max(self.host.refresh_seconds, at_least)
+
     def cached_snapshot(self) -> Snapshot | None:
         """Rows from the last visit to this host, if any, to show while it is asked again."""
         return self._remote if self.host is not None and self._remote.cached else None
@@ -121,12 +128,17 @@ class Manager:
         if self.host is not None:
             now = time.monotonic()
             if load_history or now - self._remote_at >= self.host.refresh_seconds:
-                self._remote = remote_snapshot(self.config, self.host, self.sync)
+                # A failure waits for the next interval too, instead of retrying on
+                # every tick of the panel.
                 self._remote_at = now
+                self._remote = remote_snapshot(self.config, self.host, self.sync)
             return self._remote
         history = self.history() if load_history else self._history
-        rows = [row_for(record) for record in history.records]
-        return Snapshot(rows, list(dict.fromkeys(history.issues)), history.observed_at, "local")
+        # The panel asks every second; rows are rebuilt only when the scan changed.
+        if getattr(self, "_rows_of", None) is not history:
+            self._rows_of, self._rows = history, [row_for(record) for record in history.records]
+        return Snapshot(list(self._rows), list(dict.fromkeys(history.issues)), history.observed_at,
+                        "local")
 
     def search(self, query: str, full=False, cancel=None) -> Snapshot:
         if self.host is not None:
