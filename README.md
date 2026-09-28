@@ -10,9 +10,9 @@ daemon, account, model calls, or telemetry.
 
 ![4top synthetic demo — no real user history](docs/demo/demo.svg)
 
-> **0.2.0a4 — alpha.** The current development line owns no process and drives no
-> multiplexer of its own. Codex **0.155.1** passed an authenticated exact-resume
-> smoke check against an earlier build;
+> **0.2.0a4 — alpha.** With tmux installed, 4top keeps its list beside the agents it
+> opens; it records nothing about them and asks tmux what is open. Codex **0.155.1**
+> passed an authenticated exact-resume smoke check against an earlier build;
 > Claude Code, Pi and other native versions are not certified.
 > [Evidence](docs/validation/macos-0.1.0a2.md). It is on PyPI as a pre-release: `uv tool install 4top`.
 
@@ -63,25 +63,34 @@ The panel also reads Cursor transcripts, but does not launch or resume Cursor.
 
 ## The daily loop
 
-Open `4top` and you get every session on the machine, most recent first. Select a
-row and press **Enter**: 4top asks for confirmation and then runs the native CLI
-in this terminal to resume that exact session. Leave the agent and you are back in
-the panel. **`q` closes only the panel.**
+Open `4top` and every machine is listed at once: this one first, then each
+configured host, most recent sessions first, each machine with its own page. Select
+a session and press **Enter**. The machine that owns it checks that it can resume
+there, and the agent opens. There is no confirmation dialog, and a refusal (a
+missing CLI, a directory that is gone) appears in the list instead.
 
-A plain terminal or any multiplexer you already run is equally fine: 4top starts
-the agent in the terminal it was launched from and never allocates a terminal of
-its own. If you want a session to survive closing your laptop, run 4top inside the
-multiplexer you already use.
+With **tmux** installed, 4top runs in a tmux server of its own and opens each agent
+beside the list, like files beside an editor's file tree. Opening another session
+keeps the first one running in the background; `●` marks the open ones, and Enter
+on one shows it again. `Alt-←` / `Alt-→` (or `→` in the list, or a click) move
+between the list and the agent. On a narrow screen, such as a phone, the focused
+side fills the screen. **`q` detaches**: the agents keep running, and running `4top`
+again brings everything back. `Q` closes them all.
+
+Without tmux, or with `layout = "plain"`, Enter runs the agent in this terminal and
+the list returns when it exits.
 
 | Key | Action |
 | --- | --- |
-| `↑` / `↓`, `Enter` | Select and resume |
-| `H` | Switch the panel between this machine and a configured host |
-| `/`, `Enter`, `Esc` | Search metadata, return to table, clear/cancel |
+| `↑` / `↓`, `Enter` | Select, open (or show, if it is already open) |
+| `→`, `Alt-←` / `Alt-→` | Move to the agent / between list and agent (tmux layout) |
+| `[` / `]` | Previous / next page of the machine under the cursor |
+| `/`, `Enter`, `Esc` | Search metadata, return to the list, clear search and filters |
+| `p`, `f` | Show one project; fold the machine under the cursor |
 | `Ctrl-F` | Explicit literal full-content search; `Esc` cancels |
 | `Space`, `i` | Read-only preview, details |
-| `n`, `r`, `?` | New agent, refresh, help |
-| `q`, `Ctrl-C` | Close only the panel |
+| `n`, `r`, `?` | New agent on the selected machine, refresh, help |
+| `q`, `Q`, `Ctrl-C` | Detach (tmux) or quit; close all agents and quit |
 
 Search supports case-insensitive words and quoted phrases; all terms must match.
 Full search decodes JSON text, including Chinese escaped as `\u....`. It reads
@@ -99,14 +108,14 @@ restore lost memory, network connections, shell children, or a destroyed machine
 Resume uses the CLI's **current native configuration**; 4top does not replay the
 original launch flags. Review native permissions before sending another task.
 
-Because 4top owns no process it claims nothing about liveness either: a row is a
-session you can resume, and that is all it says. Failed queries are reported as
-issues and never rendered as an empty machine.
+4top keeps no record of processes either. In the tmux layout a pane is tagged with
+the session it runs, and `●` means tmux has that pane now; nothing else is
+remembered. Failed queries are reported as issues and never rendered as an empty
+machine.
 
 Two consequences worth knowing. A resumed agent is a **new** process; two agents in
-one directory still have **no code/worktree isolation**. And `4top new` runs the
-agent in the foreground of the terminal you launched it from: outside a multiplexer
-it ends with that terminal.
+one directory still have **no code/worktree isolation**. Outside the tmux layout,
+`4top new` runs the agent in the foreground of this terminal and ends with it.
 
 ## Remote hosts over SSH
 
@@ -124,14 +133,16 @@ ssh = "me@build-box"                 # any ssh destination, including a tailnet 
 ```
 
 ```sh
-4top --host build-box              # the whole panel, scoped to that host
+4top                               # this machine and every configured host
+4top --host build-box              # the panel, scoped to that host only
 4top --host build-box list --json
 4top --host me@10.0.0.4 doctor     # an unconfigured target works too
 ```
 
-Views stay isolated: the default scope is this machine, and a host replaces it
-rather than merging machines into one table. `H` switches the panel between them
-without leaving it; `--host NAME` starts the panel already scoped. Anything that starts a process runs
+Each configured host gets its own section of the list, refreshed on its own
+interval and incrementally, so an unchanged host costs a few hundred bytes. The
+last rows seen are cached, so a host shows at once and then catches up; one that
+cannot be reached keeps its rows and says so. Anything that starts a process runs
 **on that host** through `ssh -t`, so the resumed agent lives where its history
 lives; the remote CLI does the work and the local side only hands over the
 terminal. Connection reuse (`ControlMaster`) keeps refreshes cheap, `BatchMode`
@@ -181,6 +192,8 @@ Optional configuration: `$XDG_CONFIG_HOME/4top/config.toml` (default
 refresh_seconds = 1.0
 history_refresh_seconds = 5.0
 color = "auto"                         # or "none"; NO_COLOR is also supported
+layout = "auto"                        # "tmux" (require it), "plain", or auto
+rows_per_host = 0                      # sessions per machine page; 0 fits the screen
 
 [history]
 metadata_max_bytes = 2097152
@@ -190,7 +203,16 @@ preview_max_lines = 200
 [agents.codex]
 # root = "/absolute/path/to/codex-home"
 # executable = "/absolute/path/to/a-real-wrapper"
+# args = ["--dangerously-bypass-approvals-and-sandbox"]   # added to every launch
+
+[agents.claude]
+# args = ["--dangerously-skip-permissions"]
 ```
+
+`args` are added to every start and resume of that agent, for example a permission
+mode. They are yours to choose: 4top's default adds nothing, and arguments that
+would change which session is resumed are refused. For a remote host, set them in
+that host's own configuration, because the remote 4top builds the command.
 
 Agent store roots respect `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and
 `PI_CODING_AGENT_DIR`; an explicit configured root wins. Selected history and

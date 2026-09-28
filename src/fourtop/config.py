@@ -85,6 +85,11 @@ class Config:
     color: str = "auto"
     config_path: str | None = None
     hosts: dict[str, Host] = field(default_factory=dict)
+    # Arguments added to every launch of an agent, e.g. a permission mode. Validated
+    # like command-line extras, so they cannot change which session is resumed.
+    agent_args: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    layout: str = "auto"  # auto | tmux | plain
+    rows_per_host: int = 0  # 0: fit the panel's height
 
     def root(self, agent: str) -> Root:
         return next(root for root in self.roots if root.agent == agent)
@@ -128,7 +133,8 @@ class Config:
                 raise FourtopError(f"[{key}] must be a TOML table", 2)
         ui, history, agents, hosts = (data.get(name, {}) for name in ("ui", "history", "agents", "hosts"))
         for section, values, permitted in (
-            ("ui", ui, {"refresh_seconds", "history_refresh_seconds", "color"}),
+            ("ui", ui, {"refresh_seconds", "history_refresh_seconds", "color", "layout",
+                        "rows_per_host"}),
             ("history", history, {"metadata_max_bytes", "metadata_max_lines", "preview_max_lines"}),
         ):
             if set(values) - permitted:
@@ -138,11 +144,15 @@ class Config:
         if set(agents) - set(defaults):
             raise FourtopError("Unknown agent in configuration", 2)
         roots = []
-        executables = {}
+        executables, agent_args = {}, {}
         for agent, default in defaults.items():
             options = agents.get(agent, {})
-            if not isinstance(options, dict) or set(options) - {"root", "executable"}:
+            if not isinstance(options, dict) or set(options) - {"root", "executable", "args"}:
                 raise FourtopError(f"Invalid configuration for agent {agent}", 2)
+            args = options.get("args", [])
+            if not isinstance(args, list) or not all(isinstance(a, str) and a for a in args):
+                raise FourtopError(f"agents.{agent}.args must be a list of nonempty strings", 2)
+            agent_args[agent] = tuple(args)
             root_value = options.get("root", env.get(ROOT_ENV.get(agent, ""), str(default)))
             root_path = str(_absolute(root_value))
             roots.append(Root(agent, root_path))
@@ -158,10 +168,14 @@ class Config:
         color = ui.get("color", "auto")
         if color not in ("auto", "none"):
             raise FourtopError("ui.color must be auto or none", 2)
+        layout = ui.get("layout", "auto")
+        if layout not in ("auto", "tmux", "plain"):
+            raise FourtopError("ui.layout must be auto, tmux or plain", 2)
         return cls(state, cache, roots, executables, env,
                    _number(ui, "refresh_seconds", 1.0, 0.1),
                    _number(ui, "history_refresh_seconds", 5.0, 0.1),
                    _number(history, "metadata_max_bytes", 2**21, 1, True),
                    _number(history, "metadata_max_lines", 2000, 1, True),
                    _number(history, "preview_max_lines", 200, 1, True), color, str(config_file),
-                   {name: _host(name, options) for name, options in hosts.items()})
+                   {name: _host(name, options) for name, options in hosts.items()},
+                   agent_args, layout, _number(ui, "rows_per_host", 0, 0, True))

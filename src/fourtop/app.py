@@ -1,4 +1,11 @@
-"""A small, keyboard-first terminal UI. No process policy lives in widget callbacks."""
+"""A small, keyboard-first terminal UI. No process policy lives in widget callbacks.
+
+Every configured machine is listed at once, one section each, local first. A
+section shows a fixed number of sessions and pages through the rest, so a busy
+machine cannot push the others off the screen. Inside 4top's tmux layout, opening
+a session shows it beside the list and keeps it running when another is opened;
+outside it, the session takes over this terminal until it exits.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -7,7 +14,7 @@ import os
 import subprocess
 import threading
 import time
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from rich.text import Text
@@ -17,51 +24,32 @@ from textual.app import App, ComposeResult, SuspendNotSupported
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, DataTable, Input, OptionList, Select, Static
+from textual.widgets import Button, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
 from .errors import FourtopError
 from .models import Session, Snapshot, age
-from .services import Manager
+from .workspace import Workspace
 
 
 def plain(value, *, multiline=False) -> Text:
     return Text(clean_text(str(value), multiline=multiline))
 
 
+def project(cwd: str) -> str:
+    return Path(cwd).name or cwd or "?"
 
-WHEEL_ROWS = 3
 
-
-class SessionTable(DataTable):
-    """A table whose wheel moves the highlight.
-
-    Scrolling the viewport away from the highlight leaves Enter acting on a row
-    that is off screen, so a wheel step moves the cursor and the view follows it.
-    """
-
-    def _wheel(self, rows: int) -> None:
-        if not self.row_count:
-            return
-        target = max(0, min(self.row_count - 1, self.cursor_row + rows))
-        if target != self.cursor_row:
-            self.move_cursor(row=target, animate=False)
-
-    def _on_mouse_scroll_down(self, event) -> None:
-        event.stop()
-        self._wheel(WHEEL_ROWS)
-
-    def _on_mouse_scroll_up(self, event) -> None:
-        event.stop()
-        self._wheel(-WHEEL_ROWS)
+def first_line(title: str) -> str:
+    return " ".join(clean_text(title or "").split())
 
 
 class Confirm(ModalScreen[bool]):
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, title: str, message: str, destructive=False):
+    def __init__(self, title: str, message: str, destructive=False, confirm="Confirm"):
         super().__init__()
-        self.heading, self.message, self.destructive = title, message, destructive
+        self.heading, self.message, self.destructive, self.label = title, message, destructive, confirm
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
@@ -70,7 +58,7 @@ class Confirm(ModalScreen[bool]):
                 yield Static(plain(self.message, multiline=True))
             with Horizontal(classes="buttons"):
                 yield Button("Cancel", id="cancel")
-                yield Button("Confirm", id="confirm", variant="error" if self.destructive else "primary")
+                yield Button(self.label, id="confirm", variant="error" if self.destructive else "primary")
 
     def on_mount(self):
         self.query_one("#cancel", Button).focus()  # Enter is not accidental approval.
@@ -83,25 +71,46 @@ class Confirm(ModalScreen[bool]):
         self.dismiss(False)
 
 
-class NewAgent(ModalScreen[tuple | None]):
-    BINDINGS = [("escape", "cancel", "Cancel")]
+class Info(ModalScreen[None]):
+    BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close"), ("question_mark", "close", "Close")]
 
-    def __init__(self, cwd: str, error="", values=None):
+    def __init__(self, title: str, message: str):
         super().__init__()
-        self.values = values or ("codex", cwd)
-        self.error = error
+        self.heading, self.message = title, message
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Static("New coding agent", classes="dialog-title")
+            yield Static(plain(self.heading), classes="dialog-title")
+            with VerticalScroll(classes="dialog-body"):
+                yield Static(plain(self.message, multiline=True))
+
+    def action_close(self):
+        self.dismiss(None)
+
+
+class NewAgent(ModalScreen[tuple | None]):
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, cwd: str, error="", values=None, where="this machine"):
+        super().__init__()
+        self.values = values or ("codex", cwd)
+        self.error, self.where = error, where
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static(plain(f"New coding agent on {self.where}"), classes="dialog-title")
             yield Select([(agent, agent) for agent in ("codex", "claude", "pi")],
                          value=self.values[0], allow_blank=False, id="agent")
             yield Input(value=self.values[1], placeholder="Working directory", id="cwd")
-            yield Static(plain(self.error or "Runs the original CLI in this terminal, with its own "
-                                             "permissions and authentication."), id="form-error")
+            yield Static(plain(self.error or "Runs the original CLI with its own permissions "
+                                             "and authentication."), id="form-error")
             with Horizontal(classes="buttons"):
                 yield Button("Cancel", id="cancel")
                 yield Button("Start", id="start", variant="primary")
+
+    @on(Input.Submitted, "#cwd")
+    def submitted(self):
+        self.query_one("#start", Button).press()
 
     @on(Button.Pressed)
     def pressed(self, event: Button.Pressed):
@@ -167,7 +176,7 @@ class DirectoryPrompt(ModalScreen[str | None]):
 
 
 class Preview(ModalScreen):
-    BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close")]
+    BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close"), ("space", "close", "Close")]
 
     def __init__(self, manager, row: Session):
         super().__init__()
@@ -215,7 +224,7 @@ class Preview(ModalScreen):
 
 
 class Details(ModalScreen[str | None]):
-    BINDINGS = [("escape", "close", "Close")]
+    BINDINGS = [("escape", "close", "Close"), ("i", "close", "Close")]
 
     def __init__(self, row: Session, demo=False):
         super().__init__()
@@ -226,15 +235,15 @@ class Details(ModalScreen[str | None]):
         resuming from one is impossible, and the reason is not obvious from the path."""
         row = self.row
         directory = Path(row.cwd).expanduser() if row.cwd else None
-        missing = "" if directory and directory.is_dir() else "  (missing)"
+        missing = "" if row.host != "local" or (directory and directory.is_dir()) else "  (missing)"
         lines = [f"Key: {row.key}", f"Agent: {row.agent}", f"Host: {row.host}",
                  f"Directory: {row.cwd}{missing}", f"Title: {row.title}",
                  f"Started: {row.started}", f"Last written: {row.last}",
                  f"Status: {row.status}", f"Source: {row.source}"]
         lines.extend(f"Problem: {problem}" for problem in row.problems)
         lines.append(row.issue or "")
-        lines.append("Resume starts a new process: memory, shell children and network "
-                     "state are not restored.")
+        lines.append("Opening starts the agent again from its transcript: memory, shell "
+                     "children and network state are not restored.")
         return lines
 
     def compose(self) -> ComposeResult:
@@ -244,7 +253,7 @@ class Details(ModalScreen[str | None]):
                 yield Static(plain("\n".join(self.lines()), multiline=True))
             with Horizontal(classes="buttons"):
                 yield Button("Close", id="close")
-                yield Button("Resume…", id="resume", variant="primary",
+                yield Button("Open", id="resume", variant="primary",
                              disabled=self.demo or not self.row.can_resume)
 
     @on(Button.Pressed)
@@ -255,41 +264,64 @@ class Details(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class HostPicker(ModalScreen[str | None]):
-    """Pick which machine the panel is looking at. Local is always first."""
+class ProjectPicker(ModalScreen[str | None]):
+    BINDINGS = [("escape", "cancel", "Cancel"), ("p", "cancel", "Cancel")]
 
-    BINDINGS = [("escape", "cancel", "Cancel")]
-
-    def __init__(self, current: str, choices: list[tuple[str, str]]):
+    def __init__(self, counts: list[tuple[str, int]], current: str | None):
         super().__init__()
-        self.current, self.choices = current, choices
+        self.counts, self.current = counts, current
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Static("Switch host", classes="dialog-title")
-            with VerticalScroll(classes="dialog-body"):
-                yield OptionList(*[Option(label, id=value) for value, label in self.choices], id="hosts")
-            with Horizontal(classes="buttons"):
-                yield Button("Cancel", id="cancel")
+            yield Static("Show one project", classes="dialog-title")
+            options = [Option(Text("All projects", style="bold"), id="")]
+            options += [Option(Text.assemble(name, (f"  {count}", "dim")), id=name)
+                        for name, count in self.counts]
+            yield OptionList(*options, id="projects")
 
     def on_mount(self):
-        options = self.query_one("#hosts", OptionList)
-        options.focus()
-        for index, (value, _) in enumerate(self.choices):
-            if value == self.current:
-                options.highlighted = index
-                break
+        projects = self.query_one("#projects", OptionList)
+        projects.focus()
+        ids = [""] + [name for name, _ in self.counts]
+        projects.highlighted = ids.index(self.current) if self.current in ids else 0
 
-    @on(OptionList.OptionSelected, "#hosts")
+    @on(OptionList.OptionSelected, "#projects")
     def chosen(self, event: OptionList.OptionSelected):
-        self.dismiss(event.option.id)
-
-    @on(Button.Pressed)
-    def pressed(self, event: Button.Pressed):
-        self.dismiss(None)
+        self.dismiss(event.option.id or "")
 
     def action_cancel(self):
         self.dismiss(None)
+
+
+class SessionList(OptionList):
+    """The list itself. Only the wheel is changed: it moves the highlight, so Enter
+    never acts on a row that has scrolled out of view."""
+
+    def _on_mouse_scroll_down(self, event) -> None:
+        event.stop()
+        self.action_cursor_down()
+
+    def _on_mouse_scroll_up(self, event) -> None:
+        event.stop()
+        self.action_cursor_up()
+
+
+@dataclass
+class Source:
+    """One machine's section of the list."""
+
+    manager: object
+    snapshot: Snapshot = field(default_factory=lambda: Snapshot([]))
+    loaded: bool = False
+    stale: str = ""
+    page: int = 0
+    collapsed: bool = False
+    refreshing: bool = False
+    full_keys: set[str] | None = None
+
+    @property
+    def name(self) -> str:
+        return self.manager.scope
 
 
 class FourtopApp(App[tuple | None]):
@@ -297,28 +329,34 @@ class FourtopApp(App[tuple | None]):
     ENABLE_COMMAND_PALETTE = False
     BINDINGS = [
         Binding("q", "quit", "Quit"), Binding("ctrl+c", "quit", "Quit", priority=True),
+        Binding("Q", "close_all", "Quit all"),
         Binding("slash", "search", "Search"), Binding("escape", "clear_search", "Clear"),
-        Binding("n", "new", "New"),
+        Binding("n", "new", "New"), Binding("p", "project", "Project"),
         Binding("space", "preview", "Preview"), Binding("i", "details", "Details"),
+        Binding("right_square_bracket", "page(1)", "Next page"),
+        Binding("left_square_bracket", "page(-1)", "Previous page"),
+        Binding("right", "stage", "Agent"), Binding("f", "fold", "Fold"),
         Binding("ctrl+f", "full_search", "Full content"), Binding("r", "refresh", "Refresh"),
-        Binding("H", "switch_host", "Host"), Binding("question_mark", "help", "Help"),
+        Binding("question_mark", "help", "Help"),
     ]
     CSS = """
     Screen { background: $background; color: $text; }
-    #brand { height: 2; padding: 0 1; text-style: bold; background: $boost; }
-    #counts { height: 1; padding: 0 1; color: $text-muted; }
-    #query { height: 3; margin: 0 1; display: none; }
-    #table { height: 1fr; margin: 1 0 0 0; }
-    DataTable > .datatable--header { background: $boost; text-style: bold; }
-    #selection { height: 3; padding: 0 1; border-top: solid $primary; }
-    #status { height: 2; padding: 0 1; color: $text-muted; }
-    #keys { height: 1; padding: 0 1; background: $boost; }
-    ModalScreen { align: center middle; background: $background 80%; }
+    #top { height: 1; padding: 0 1; background: $boost; }
+    #query { height: 1; border: none; padding: 0 1; margin: 0; display: none; background: $boost; }
+    #query:focus { border: none; }
+    #list { height: 1fr; border: none; padding: 0; background: $background; scrollbar-size-vertical: 1; }
+    #list:focus { border: none; }
+    #list > .option-list--option-highlighted { background: $primary 30%; text-style: none; }
+    #list:focus > .option-list--option-highlighted { background: $primary 45%; }
+    #status { height: auto; max-height: 2; padding: 0 1; color: $warning; }
+    #keys { height: 1; padding: 0 1; color: $text-muted; background: $boost; }
+    ModalScreen { align: center middle; background: $background 70%; }
     .dialog { width: 76; max-width: 96%; height: auto; max-height: 90%;
               border: round $primary; background: $surface; padding: 1 2; }
     .dialog-title { text-style: bold; margin-bottom: 1; }
     .dialog-body { height: auto; max-height: 18; margin-bottom: 1; }
     .dialog Input, .dialog Select { margin-bottom: 1; }
+    .dialog OptionList { height: auto; max-height: 20; }
     .buttons { height: auto; align-horizontal: right; margin-top: 1; }
     .buttons Button { min-width: 10; margin-left: 1; }
     .preview-dialog { width: 100; height: 85%; }
@@ -326,309 +364,451 @@ class FourtopApp(App[tuple | None]):
     #form-error { color: $text-muted; }
     """
 
-    def __init__(self, manager, *, no_color=False):
+    def __init__(self, manager, *, no_color=False, hosts=None, workspace: Workspace | None = None):
         from textual.filter import NoColor
         super().__init__(ansi_color=True)
-        self.manager = manager
+        managers = [manager, *(hosts or [])]
+        self.sources = [Source(m) for m in managers]
+        self.workspace = workspace
         requested_no_color = no_color or getattr(manager.config, "color", "auto") == "none"
         if requested_no_color and not self.no_color:
             self._filters.append(NoColor())
             self.no_color = True
-        self.snapshot_data = Snapshot([])
-        self.shown: list[Session] = []
-        self.selected_key = None
-        self.stale = False
-        self._refreshing = self._history_loading = self._launching = False
-        self._columns = []
-        self._keys = []
-        self._cell_values = {}
-        self._row_signatures = {}
-        self._derived = {}
-        self._full_keys: set[str] | None = None
-        self._full_issues: list[str] = []
+        self.selected_key = None  # "host:key" of the highlighted row
+        # Until the user moves, the highlight follows the top of the list: sections
+        # arrive at different times, and the first to arrive is not the first shown.
+        self._following_top = True
+        self._placed: str | None = None
+        self.project_filter: str | None = None
+        self.opened: dict[str, object] = {}  # tag -> tmux pane, as tmux reports it
+        self.busy: dict[str, str] = {}  # tag -> what is happening to it right now
+        self._signature = None
+        self._ids: list[str] = []
+        self._rows: dict[str, tuple[Source, Session]] = {}
+        self._history_loading = False
+        self._launching = False
         self._full_cancel = threading.Event()
         self._search_generation = 0
         self._full_running = False
         self._fourtop_closing = False
         self._status_message = ""
         if not manager.demo:
-            self.selected_key = manager.store.load_view().get("selected")
+            saved = manager.store.load_view().get("selected")
+            self.selected_key = f"local:{saved}" if saved else None
+
+    # ----- compatibility: the first source is "the" manager -------------------------
+
+    @property
+    def manager(self):
+        return self.sources[0].manager
+
+    @property
+    def shown(self) -> list[Session]:
+        return [row for _, row in self._rows.values()]
+
+    # ----- layout ----------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
-        label = "4top  /  Your coding agents, one terminal."
-        if self.manager.demo:
-            label += "  [DEMO]"
-        yield Static(plain(label), id="brand")
-        yield Static("Opening the view…", id="counts")
-        yield Input(placeholder="Search titles, directories, agents or keys · Ctrl-F: full content · Esc: clear", id="query")
-        yield SessionTable(id="table", cursor_type="row", show_row_labels=False, zebra_stripes=True)
-        yield Static("", id="selection")
+        yield Static("", id="top")
+        yield Input(placeholder="search titles, directories, agents · Ctrl-F full content · Esc clear",
+                    id="query")
+        yield SessionList(id="list")
         yield Static("", id="status")
-        yield Static("/ search   Enter resume   n new   H host   Space preview   i details   ? help   q quit", id="keys")
+        yield Static("", id="keys")
 
     async def on_mount(self):
-        self._layout_columns()
-        self.query_one("#table", DataTable).focus()
+        self.query_one("#list", OptionList).focus()
+        if self.workspace:
+            with contextlib.suppress(FourtopError):
+                await asyncio.to_thread(self.workspace.ensure_layout, self.size.width)
+            self.set_interval(1.0, self.poll_workspace)
+        for source in self.sources:
+            cached = getattr(source.manager, "cached_snapshot", lambda: None)()
+            if cached is not None:
+                source.snapshot, source.loaded = cached, True
+        self.render_list()
         self.set_interval(self.manager.config.refresh_seconds, self.refresh_rows)
-        if not self.manager.remote:
+        local = self._local()
+        if local is not None:
             self.set_interval(self.manager.config.history_refresh_seconds, self.refresh_history)
             self.run_worker(self.refresh_history())
-        self._show_cached()
         await self.refresh_rows()
-
-    def _show_cached(self):
-        cached = getattr(self.manager, "cached_snapshot", lambda: None)()
-        if cached is not None:
-            self.snapshot_data = cached
-            self.render_rows()
 
     def on_resize(self, event):
         if self.is_mounted:
-            self._layout_columns(event.size.width)
-            self.render_rows()
+            self._signature = None
+            self.render_list()
+            if self.workspace:
+                self.run_worker(asyncio.to_thread(self.workspace.fit, event.size.width))
 
-    def _layout_columns(self, width=None):
-        width = width if width is not None else self.size.width
-        if width < 60:
-            columns = [("agent", "AGENT", 7), ("title", "TITLE", max(12, width - 10))]
-        else:
-            columns = [("agent", "AGENT", 7), ("project", "PROJECT", 18 if width >= 80 else 13)]
-            if width >= 100:
-                columns.append(("age", "UPDATED", 9))
-            used = sum(item[2] + 2 for item in columns)
-            columns.append(("title", "TITLE", max(12, width - used - 3)))
-        if columns == self._columns:
-            return
-        self._columns = columns
-        table = self.query_one("#table", DataTable)
-        table.clear(columns=True)
-        for key, name, column_width in columns:
-            table.add_column(name, width=column_width, key=key)
-        self._keys, self._cell_values = [], {}
-        self._row_signatures = {}
-        self._derived = {}
+    def _local(self) -> Source | None:
+        return next((s for s in self.sources if not s.manager.remote and not s.manager.demo), None)
+
+    # ----- data --------------------------------------------------------------------
 
     async def refresh_history(self):
-        if self._history_loading or self._fourtop_closing or self.manager.remote:
+        local = self._local()
+        if local is None or self._history_loading or self._fourtop_closing:
             return
         self._history_loading = True
         try:
-            await asyncio.to_thread(self.manager.history)
-            await self.refresh_rows()
+            await asyncio.to_thread(local.manager.history)
+            await self._refresh(local)
         except (FourtopError, OSError, ValueError) as exc:
             self.set_status("History unavailable: " + str(exc))
         finally:
             self._history_loading = False
 
     async def refresh_rows(self):
-        if self._refreshing or self._fourtop_closing:
+        await asyncio.gather(*(self._refresh(source) for source in self.sources))
+
+    async def _refresh(self, source: Source):
+        if source.refreshing or self._fourtop_closing:
             return
-        self._refreshing = True
-        manager = self.manager
+        source.refreshing = True
+        manager = source.manager
         try:
             snapshot = await asyncio.to_thread(manager.snapshot, False)
-            if manager is not self.manager or self._fourtop_closing:
-                return  # The host changed while this was in flight; its rows are not ours.
-            self.snapshot_data = snapshot
-            self.stale = False
-            self.render_rows()
-        except (FourtopError, OSError, ValueError) as exc:
-            if manager is not self.manager or self._fourtop_closing:
+            if source not in self.sources or self._fourtop_closing:
                 return
-            # Keep the previous view; a failed source is not an empty machine.
-            self.stale = True
-            self.set_status("STALE: " + str(exc))
-            self.render_rows()
+            source.snapshot, source.loaded, source.stale = snapshot, True, ""
+        except (FourtopError, OSError, ValueError) as exc:
+            if self._fourtop_closing:
+                return
+            # Keep the previous rows; a failed source is not an empty machine.
+            source.stale, source.loaded = clean_text(str(exc)), True
         finally:
-            self._refreshing = False
+            source.refreshing = False
+        self.render_list()
 
-    def render_rows(self):
-        if self._fourtop_closing:
+    async def poll_workspace(self):
+        if not self.workspace or self._fourtop_closing:
             return
-        query = self.query_one("#query", Input).value
-        terms = query_terms(query, tolerant=True)
-        rows = self.snapshot_data.rows
-        if self._full_keys is not None:
-            rows = [row for row in rows if row.key in self._full_keys]
+        try:
+            ended = await asyncio.to_thread(self.workspace.reap)
+            panes = await asyncio.to_thread(self.workspace.panes)
+        except FourtopError as exc:
+            self.set_status(str(exc))
+            return
+        if ended:
+            names = ", ".join(self._label(pane.key) for pane in ended)
+            self.set_status(f"Ended: {names}. Its transcript is unchanged; Enter opens it again.")
+        if set(panes) != set(self.opened):
+            self.opened = panes
+            self.render_list()
+
+    def _label(self, tag: str) -> str:
+        found = self._find(tag)
+        return first_line(found[1].title)[:24] if found else tag.split(":", 1)[-1][:12]
+
+    def _find(self, tag: str) -> tuple[Source, Session] | None:
+        if tag in self._rows:
+            return self._rows[tag]
+        host, _, key = tag.partition(":")
+        for source in self.sources:
+            if source.name == host:
+                for row in source.snapshot.rows:
+                    if row.key == key:
+                        return source, row
+        return None
+
+    # ----- rendering ---------------------------------------------------------------
+
+    def _visible(self, source: Source) -> list[Session]:
+        terms = query_terms(self.query_one("#query", Input).value, tolerant=True)
+        rows = source.snapshot.rows
+        if source.full_keys is not None:
+            rows = [row for row in rows if row.key in source.full_keys]
         elif terms:
             rows = [row for row in rows if all(term in "\n".join(
                 (row.title, row.cwd, row.agent, row.key)).casefold() for term in terms)]
-        self.shown = rows
-        keys = [row.key for row in rows]
-        table = self.query_one("#table", DataTable)
-        rebuild = keys != self._keys
-        if rebuild:
-            table.clear()
-            self._cell_values.clear()
-            self._row_signatures.clear()
-            self._derived.clear()
-        # Deriving a label or a project name for every row on every tick dominates the
-        # refresh cost of a large store, so derived values are cached until the row,
-        # or the coarse age bucket, changes.
-        now = datetime.now(timezone.utc)
-        seconds = int(now.timestamp())
-        recent_cutoff = (now - timedelta(hours=1)).isoformat()
-        for row in rows:
-            bucket = seconds if row.last > recent_cutoff else seconds // 60
-            cached = self._derived.get(row.key)
-            if (cached is None or cached[0] != row.last or cached[1] != bucket
-                    or cached[2] != row.cwd):
-                cached = self._derived[row.key] = (
-                    row.last, bucket, row.cwd, age(row.last),
-                    Path(row.cwd).name or row.cwd or "unknown")
-            values = {"agent": row.agent, "project": cached[4], "age": cached[3],
-                      "title": row.title or "(untitled)"}
-            signature = (row.agent, row.cwd, row.title, row.status, cached[3])
-            if not rebuild and self._row_signatures.get(row.key) == signature:
+        if self.project_filter:
+            rows = [row for row in rows if project(row.cwd) == self.project_filter]
+        return [row for row in rows if not getattr(row, "subagent", False)]
+
+    def page_sizes(self, visible: dict[int, list[Session]]) -> dict[int, int]:
+        """Rows per machine. A machine with few sessions takes only what it needs and
+        the rest is shared by the others, so no screen space sits empty."""
+        configured = getattr(self.manager.config, "rows_per_host", 0) or 0
+        if configured:
+            return {index: configured for index in visible}
+        height = self.query_one("#list", OptionList).size.height or (self.size.height - 3)
+        expanded = [i for i, s in enumerate(self.sources) if not s.collapsed]
+        left = max(2, (height - len(self.sources)) // 2)
+        sizes = {}
+        pending = sorted(expanded, key=lambda i: len(visible[i]))
+        while pending:
+            share = max(2, left // len(pending))
+            index = pending[0]
+            if max(1, len(visible[index])) <= share:
+                sizes[index] = max(1, len(visible[index]))
+                left -= sizes[index]
+                pending.pop(0)
                 continue
-            cells = [plain(values[column]) for column, _, _ in self._columns]
-            if rebuild:
-                table.add_row(*cells, key=row.key)
-            else:
-                for (column, _, _), cell in zip(self._columns, cells, strict=True):
-                    if self._cell_values.get((row.key, column)) != cell:
-                        table.update_cell(row.key, column, cell)
-            for (column, _, _), cell in zip(self._columns, cells, strict=True):
-                self._cell_values[row.key, column] = cell
-            self._row_signatures[row.key] = signature
-        self._keys = keys
-        if keys:
-            index = keys.index(self.selected_key) if self.selected_key in keys else min(table.cursor_row, len(keys) - 1)
-            table.move_cursor(row=max(0, index), animate=False)
-            self.selected_key = keys[max(0, index)]
-        scope = "FULL SEARCH" if self._full_keys is not None else "REMOTE" if self.manager.remote else "LOCAL"
-        total = len(self.snapshot_data.rows)
-        label = f"{total} sessions · {self.snapshot_data.scope} · {scope} · {len(rows)} shown"
-        if self.stale:
-            label += " · STALE"
-        elif self.snapshot_data.cached:
-            label += " · cached, updating…"
-        if self.manager.demo:
-            label = "SYNTHETIC DEMO · no real data or processes  /  " + label
-        self.query_one("#counts", Static).update(plain(label))
-        self.show_selection()
-        issues = self._full_issues + self.snapshot_data.issues
-        message = self._status_message or " · ".join(issues[:2])
-        if self._full_running:
-            message = "Searching decoded raw records… Esc cancels. The table stays usable."
-        elif not rows and not terms:
-            message = "No sessions found. Press n to start an agent, or try 4top --demo. " + message
-        self.query_one("#status", Static).update(plain(message))
+            for index in pending:
+                sizes[index] = share
+            break
+        return {index: sizes.get(index, 2) for index in visible}
 
-    def current(self) -> Session | None:
-        table = self.query_one("#table", DataTable)
-        index = table.cursor_row
-        return self.shown[index] if 0 <= index < len(self.shown) else None
+    def page_size(self) -> int:
+        """Rows per page of the section under the cursor."""
+        index = self.sources.index(self.current_source())
+        return self.page_sizes({i: self._visible(s) for i, s in enumerate(self.sources)})[index]
 
-    def show_selection(self):
-        row = self.current()
-        if not row:
-            self.query_one("#selection", Static).update("No selection. Clear the search or press r.")
+    def render_list(self):
+        if self._fourtop_closing or not self.is_mounted:
             return
-        verb = ("preview" if self.manager.demo else
-                f"resume on {row.host}" if self.manager.remote else
-                "resume" if row.can_resume else "details")
-        info = f"{row.agent} · {row.cwd}\nEnter: {verb}"
-        self.query_one("#selection", Static).update(plain(info, multiline=True))
+        listing = self.query_one("#list", OptionList)
+        width = max(20, (listing.size.width or self.size.width) - 2)
+        every = {index: self._visible(source) for index, source in enumerate(self.sources)}
+        sizes = self.page_sizes(every)
+        options, rows, signature = [], {}, [width, tuple(sizes.items()), tuple(self.opened),
+                                            tuple(self.busy.items())]
+        for index, source in enumerate(self.sources):
+            visible, size = every[index], sizes[index]
+            pages = max(1, -(-len(visible) // size))
+            source.page = min(source.page, pages - 1)
+            header = self._header(source, len(visible), pages, width)
+            options.append(Option(header, id=f"h:{index}", disabled=True))
+            signature.append((header.plain, source.collapsed))
+            if source.collapsed:
+                continue
+            page = visible[source.page * size:(source.page + 1) * size]
+            if not page:
+                note = ("loading…" if not source.loaded else
+                        "no match" if len(source.snapshot.rows) else "no sessions")
+                options.append(Option(Text("   " + note, style="dim italic"), id=f"e:{index}",
+                                      disabled=True))
+                signature.append(note)
+            for row in page:
+                tag = f"{source.name}:{row.key}"
+                rows[tag] = (source, row)
+                options.append(Option(self._row(row, tag, width), id=tag))
+                signature.append((tag, row.title, row.last, row.cwd, row.agent, row.can_resume))
+        signature = tuple(signature)
+        self._rows = rows
+        if signature != self._signature:
+            self._signature = signature
+            highlighted = listing.highlighted
+            listing.clear_options()
+            listing.add_options(options)
+            self._ids = [option.id for option in options]
+            target = self.selected_key if self.selected_key in self._ids else None
+            if target is not None:
+                self._following_top = False
+            elif self._following_top:
+                highlighted = None
+            if target is None and highlighted is not None and self._ids:
+                target = self._ids[min(highlighted, len(self._ids) - 1)]
+                if target.startswith("e:"):
+                    target = self._ids[max(0, self._ids.index(target) - 1)]
+            if target is None:
+                target = next((i for i in self._ids if not i.startswith(("h:", "e:"))), None)
+            if target is not None:
+                self._placed = target
+                listing.highlighted = self._ids.index(target)
+        self._render_chrome(width)
 
-    @on(DataTable.RowHighlighted)
-    def highlighted(self, event):
-        if event.row_key.value in self._keys:
-            self.selected_key = event.row_key.value
-        self.show_selection()
+    def _header(self, source: Source, count: int, pages: int, width: int) -> Text:
+        arrow = "▸" if source.collapsed else "▾"
+        left = Text.assemble((f"{arrow} {source.name}", "bold"), (f" · {count}", "dim"))
+        if source.stale:
+            left.append(" · unreachable", "bold red")
+        elif not source.loaded or source.refreshing and not source.snapshot.rows:
+            left.append(" · loading", "dim italic")
+        elif source.snapshot.cached:
+            left.append(" · cached", "dim italic")
+        if source.snapshot.issues:
+            left.append(" · partial", "yellow")
+        right = Text(f"{source.page + 1}/{pages} [ ]" if pages > 1 and not source.collapsed else "",
+                     style="dim")
+        gap = max(1, width - left.cell_len - right.cell_len)
+        return Text.assemble(left, " " * gap, right)
 
-    @on(DataTable.RowSelected)
-    async def selected(self, event):
-        await self.open_current()
+    def _row(self, row: Session, tag: str, width: int) -> Text:
+        opened = tag in self.opened
+        title = first_line(row.title)
+        head = Text()
+        head.append("● " if opened else "  ", style="bold green")
+        head.append(title or "(untitled)", style="bold" if opened else "" if title else "dim italic")
+        head.truncate(width, overflow="ellipsis")
+        meta = [row.agent, project(row.cwd), age(row.last)]
+        if not row.can_resume:
+            meta.append("read-only")
+        busy = self.busy.get(tag)
+        foot = Text("    ")
+        if busy:
+            foot.append(busy + " · ", style="bold yellow")
+        foot.append(" · ".join(meta), style="dim")
+        foot.truncate(width, overflow="ellipsis")
+        return Text("\n").join([head, foot])
 
-    @on(Input.Changed, "#query")
-    def search_changed(self):
-        self._full_cancel.set()
-        self._search_generation += 1
-        self._full_keys = None
-        self._full_issues = []
-        self._status_message = ""
-        self.render_rows()
-
-    @on(Input.Submitted, "#query")
-    def search_submitted(self):
-        self.query_one("#table", DataTable).focus()
+    def _render_chrome(self, width: int):
+        filters = []
+        if self.project_filter:
+            filters.append(f"project {self.project_filter}")
+        query = self.query_one("#query", Input).value.strip()
+        if query and not self.query_one("#query", Input).display:
+            filters.append(f"“{query}”")
+        if any(source.full_keys is not None for source in self.sources):
+            filters.append("full content")
+        top = Text("4top", style="bold")
+        if self.manager.demo:
+            top.append("  DEMO · synthetic data, no real processes", style="bold yellow")
+        if filters:
+            top.append("  " + " · ".join(filters) + "  (Esc clears)", style="cyan")
+        if self._full_running:
+            top.append("  searching…", style="dim italic")
+        elif any(s.refreshing and not s.loaded for s in self.sources):
+            top.append("  ⟳", style="dim")
+        top.truncate(width, overflow="ellipsis")
+        self.query_one("#top", Static).update(top)
+        keys = ["⏎ open", "/ search", "p project", "space preview", "[ ] page", "n new"]
+        if self.workspace:
+            keys.insert(1, "→ agent")
+            keys.append("q detach")
+        else:
+            keys.append("q quit")
+        keys.append("? help")
+        line, used = [], 0
+        for item in keys:
+            if used + len(item) + 3 > width:
+                break
+            line.append(item)
+            used += len(item) + 3
+        self.query_one("#keys", Static).update(Text("   ".join(line)))
+        message = self._status_message
+        if not message:
+            issues = [f"{s.name}: {s.stale}" for s in self.sources if s.stale]
+            issues += [issue for s in self.sources for issue in s.snapshot.issues][:2]
+            message = " · ".join(issues[:2])
+        status = self.query_one("#status", Static)
+        status.update(plain(message))
+        status.display = bool(message)
 
     def set_status(self, message):
         self._status_message = clean_text(message)
         if self.is_mounted and not self._fourtop_closing:
-            self.query_one("#status", Static).update(plain(message))
+            status = self.query_one("#status", Static)
+            status.update(plain(self._status_message))
+            status.display = bool(self._status_message)
+
+    # ----- selection -------------------------------------------------------------
+
+    def _highlighted_id(self) -> str | None:
+        index = self.query_one("#list", OptionList).highlighted
+        return self._ids[index] if index is not None and 0 <= index < len(self._ids) else None
+
+    def current(self) -> Session | None:
+        found = self._rows.get(self._highlighted_id() or "")
+        return found[1] if found else None
+
+    def current_source(self) -> Source:
+        ident = self._highlighted_id() or ""
+        if ident in self._rows:
+            return self._rows[ident][0]
+        if ident[:2] in ("h:", "e:"):
+            return self.sources[int(ident[2:])]
+        return self.sources[0]
+
+    @on(OptionList.OptionHighlighted, "#list")
+    def highlighted(self, event):
+        ident = event.option.id
+        if ident == self._placed:
+            self._placed = None  # the list placed it there, not the user
+            return
+        self._following_top = False
+        if ident in self._rows:
+            self.selected_key = ident
+
+    @on(OptionList.OptionSelected, "#list")
+    async def selected(self, event):
+        await self.open_current()
+
+    def action_fold(self):
+        """Fold or unfold the machine under the cursor (its name stays listed)."""
+        source = self.current_source()
+        source.collapsed = not source.collapsed
+        self._following_top = not any(not s.collapsed and self._visible(s) for s in self.sources)
+        self.render_list()
+
+    # ----- search and filters ----------------------------------------------------
 
     def action_search(self):
         query = self.query_one("#query", Input)
         query.display = True
         query.focus()
 
-    def action_clear_search(self):
+    @on(Input.Changed, "#query")
+    def search_changed(self):
         self._full_cancel.set()
         self._search_generation += 1
-        self._full_keys, self._full_issues = None, []
+        for source in self.sources:
+            source.full_keys = None
+            source.page = 0
+        self._status_message = ""
+        self._following_top, self.selected_key = True, None
+        self.render_list()
+
+    @on(Input.Submitted, "#query")
+    def search_submitted(self):
         query = self.query_one("#query", Input)
+        query.display = False
+        self.query_one("#list", OptionList).focus()
+        self.render_list()
+
+    def action_clear_search(self):
+        query = self.query_one("#query", Input)
+        if self._full_running:
+            self._full_cancel.set()
+            self.set_status("Full-content search cancelled.")
         query.value = ""
         query.display = False
-        self.query_one("#table", DataTable).focus()
-        self.render_rows()
+        self.project_filter = None
+        for source in self.sources:
+            source.full_keys = None
+        self._status_message = ""
+        self.query_one("#list", OptionList).focus()
+        self.render_list()
+
+    def action_project(self):
+        if isinstance(self.focused, Input):
+            return
+        counts: dict[str, int] = {}
+        for source in self.sources:
+            for row in source.snapshot.rows:
+                counts[project(row.cwd)] = counts.get(project(row.cwd), 0) + 1
+        ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+        self.push_screen(ProjectPicker(ranked, self.project_filter), self._project_chosen)
+
+    def _project_chosen(self, name):
+        if name is None:
+            return
+        self.project_filter = name or None
+        for source in self.sources:
+            source.page = 0
+        self.render_list()
+
+    def action_page(self, step: int):
+        source = self.current_source()
+        source.page = max(0, source.page + step)
+        self.selected_key = None
+        self.render_list()
+        index = self._ids.index(f"h:{self.sources.index(source)}")
+        listing = self.query_one("#list", OptionList)
+        listing.highlighted = min(index + 1, len(self._ids) - 1)
 
     def action_refresh(self):
         self._status_message = ""
-        if not self.manager.remote:
+        if self._local() is not None:
             self.run_worker(self.refresh_history())
-        self.run_worker(self.refresh_rows())
-
-    def action_switch_host(self):
-        if self.manager.demo:
-            self.set_status("DEMO is a single synthetic view; it has no hosts.")
-            return
-        hosts = getattr(self.manager.config, "hosts", {}) or {}
-        if not hosts:
-            self.set_status("No [hosts.NAME] entries are configured. See docs/remote-design.md.")
-            return
-        choices = [("", "local · this machine")]
-        choices += [(name, f"{name} · {host.ssh}") for name, host in sorted(hosts.items())]
-        current = self.manager.scope if self.manager.remote else ""
-        self.push_screen(HostPicker(current, choices), self._switch_to)
-
-    def _switch_to(self, name):
-        """Replace the whole view with another machine's. Rows, selection and any
-        running search belong to the old scope and are dropped."""
-        if name is None:
-            return
-        config = self.manager.config
-        target = config.resolve_host(name or None)
-        if (target.name if target else "local") == self.manager.scope:
-            return  # Already looking at that scope.
-        previous, self.manager = self.manager, Manager(config, target)
-        previous.close()
-        # Let the new scope refresh immediately instead of waiting for the tick that
-        # the previous scope's request would otherwise block.
-        self._refreshing = self._history_loading = False
-        self.snapshot_data = Snapshot([])
-        self.shown = []
-        self.selected_key = None
-        self.stale = False
-        self._status_message = ""
-        self._full_cancel.set()
-        self._full_keys, self._full_issues = None, []
-        query = self.query_one("#query", Input)
-        query.value = ""
-        query.display = False
-        self.query_one("#table", DataTable).focus()
-        self.set_status(f"Switching to {self.manager.scope}…")
-        if not self.manager.remote:
-            self.run_worker(self.refresh_history())
-        self._show_cached()
         self.run_worker(self.refresh_rows())
 
     def action_full_search(self):
         query = self.query_one("#query", Input).value
         if not query.strip():
             self.action_search()
-            self.set_status("Enter a literal query before starting full-content search.")
+            self.set_status("Type a literal query first, then Ctrl-F searches full content.")
             return
         if self._full_running:
             self._full_cancel.set()
@@ -636,148 +816,170 @@ class FourtopApp(App[tuple | None]):
             return
         self._full_cancel = threading.Event()
         self._search_generation += 1
-        generation = self._search_generation
-        self.run_worker(self._do_full_search(query, generation))
+        self.run_worker(self._do_full_search(query, self._search_generation))
 
     async def _do_full_search(self, query, generation):
         self._full_running = True
-        self.render_rows()
-        try:
-            result = await asyncio.to_thread(self.manager.search, query, True, self._full_cancel)
+        self.render_list()
+
+        async def one(source):
+            try:
+                result = await asyncio.to_thread(source.manager.search, query, True, self._full_cancel)
+            except (FourtopError, OSError, ValueError) as exc:
+                self.set_status(f"{source.name}: full-content search failed: {exc}")
+                return
             if generation == self._search_generation and not self._fourtop_closing:
-                self._full_keys = {row.key for row in result.rows}
-                self._full_issues = result.issues
-        except (FourtopError, OSError, ValueError) as exc:
-            self.set_status("Full-content search failed: " + str(exc))
+                source.full_keys = {row.key for row in result.rows}
+                source.page = 0
+        try:
+            await asyncio.gather(*(one(source) for source in self.sources))
         finally:
             self._full_running = False
             if not self._fourtop_closing:
-                self.render_rows()
+                self._signature = None
+                self.render_list()
+
+    # ----- actions on a session --------------------------------------------------
 
     def action_preview(self):
         row = self.current()
         if row:
-            self.push_screen(Preview(self.manager, row))
-
-    def action_new(self):
-        if self.manager.demo:
-            self.set_status("DEMO is read-only. No agent will be started.")
-        elif self.manager.remote:
-            self.set_status(f"Start agents on {self.manager.scope} with "
-                            f"`4top --host {self.manager.scope} new AGENT`.")
-        elif self._launching:
-            self.set_status("A launch is already in progress in this panel.")
-        else:
-            self.push_screen(NewAgent(os.getcwd()), self._new_result)
-
-    def _new_result(self, values):
-        if values:
-            self.run_worker(self._start(values))
-
-    async def _start(self, values):
-        self._launching = True
-        try:
-            plan = await asyncio.to_thread(self.manager.new, *values)
-        except (FourtopError, OSError, ValueError) as exc:
-            self._launching = False
-            self.push_screen(NewAgent(values[1], clean_text(str(exc)), values), self._new_result)
-            return
-        self._launching = False
-        self._hand_over(lambda: self.manager.run(plan), f"Starting {plan.agent} in this terminal…",
-                        f"Run `4top new {plan.agent}` instead.")
+            self.push_screen(Preview(self.current_source().manager, row))
 
     def action_details(self):
         row = self.current()
         if row:
-            self.push_screen(Details(row, self.manager.demo), lambda action: self._detail_action(row, action))
+            source = self.current_source()
+            self.push_screen(Details(row, self.manager.demo),
+                             lambda action: self._detail_action(source, row, action))
 
-    def _detail_action(self, row, action):
-        if action != "resume" or self.manager.demo:
-            return
-        self.run_worker(self._prepare_resume(row))
+    def _detail_action(self, source, row, action):
+        if action == "resume" and not self.manager.demo:
+            self.run_worker(self._open(source, row))
+
+    def action_stage(self):
+        if self.workspace and not isinstance(self.focused, Input):
+            self.run_worker(asyncio.to_thread(self.workspace.show, self.workspace.stage()))
 
     async def open_current(self):
         row = self.current()
         if not row:
             return
+        source = self.current_source()
         if self.manager.demo:
             self.action_preview()
         elif row.can_resume:
-            await self._prepare_resume(row)
+            await self._open(source, row)
         else:
             self.action_details()
 
-    async def _prepare_resume(self, row: Session):
-        """Ask the machine that owns the session whether a resume is possible there.
-
-        A refusal now is visible in the panel. The same refusal raised during the
-        terminal hand-over flashes past under a panel that repaints immediately
-        afterwards, which reads as "nothing happened".
-        """
-        if self._launching:
+    async def _open(self, source: Source, row: Session, cwd: str | None = None):
+        """Open a session: show it if it is already running, otherwise ask the machine
+        that owns it whether it can resume, and start it. A refusal is shown on the
+        row itself, never after the terminal has been handed over."""
+        tag = f"{source.name}:{row.key}"
+        if tag in self.busy:
+            return
+        pane = self.opened.get(tag)
+        if pane is not None and self.workspace:
+            await asyncio.to_thread(self.workspace.show, pane.id)
+            return
+        if self._launching and not self.workspace:
             self.set_status("A launch is already in progress in this panel.")
             return
-        self._launching = True
+        manager = source.manager
+        self._busy(tag, "checking")
         try:
-            report = await asyncio.to_thread(self.manager.check, row.key)
+            report = await asyncio.to_thread(manager.check, row.key)
         except (FourtopError, OSError, ValueError) as exc:
-            self.set_status(f"Cannot check {row.key}: {exc}")
+            self._busy(tag, None)
+            self.set_status(f"Cannot check {first_line(row.title)[:30] or row.key}: {exc}")
             return
-        finally:
-            self._launching = False
-        if report["resumable"] is None:
-            # An older remote cannot answer; say so and let the hand-over decide.
-            self.set_status(f"{report['reason']}; resuming without a preflight.")
-            self._confirm_resume(row)
+        if cwd and report.get("cwd_missing"):
+            report = {**report, "resumable": True}  # a directory was chosen; the plan checks it
+        if report["resumable"] is False:
+            self._busy(tag, None)
+            if report.get("cwd_missing") and not cwd:
+                self.push_screen(
+                    DirectoryPrompt(row.cwd, os.getcwd(), validate=not manager.remote),
+                    lambda answer: self.run_worker(self._open(source, row, answer)) if answer else None)
+            else:
+                self.set_status(f"{row.agent} on {source.name}: {report['reason']}")
             return
-        if report["resumable"]:
-            self._confirm_resume(row)
-            return
-        if report.get("cwd_missing"):
-            self.push_screen(DirectoryPrompt(row.cwd, os.getcwd(), validate=not self.manager.remote),
-                             lambda answer: self.run_worker(self._resume(row, answer)) if answer else None)
-            return
-        self.set_status(f"{row.agent} on {self.manager.scope}: {report['reason']}")
-
-    def _confirm_resume(self, row: Session, cwd: str | None = None):
-        if self._launching:
-            self.set_status("A launch is already in progress in this panel.")
-            return
-        if self.manager.remote:
-            message = (f"This runs on {row.host} through ssh and creates a NEW {row.agent} process there.\n"
-                       f"Directory: {cwd or row.cwd}\nSession: {row.key}\n"
-                       "The remote CLI uses its current native configuration.")
-            self.push_screen(Confirm("Resume on " + row.host, message),
-                             lambda answer: self.run_worker(self._resume(row)) if answer else None)
-            return
-        native = row.record.native_id if row.record else None
-        message = (f"This creates a NEW {row.agent} process.\nDirectory: {cwd or row.cwd}\n"
-                   f"Session: {row.key}\nNative ID: {native or 'exact source path'}\n"
-                   "Current native configuration applies; original launch flags are not replayed.\n"
-                   "Native execution may modify files or incur model costs.")
-        self.push_screen(Confirm("Resume session", message),
-                         lambda answer: self.run_worker(self._resume(row, cwd)) if answer else None)
-
-    async def _resume(self, row: Session, cwd: str | None = None):
-        self._launching = True
+        self._busy(tag, "starting")
         try:
-            if self.manager.remote:
+            if manager.remote:
                 remote = ["resume", row.key, "--yes"] + (["--cwd", cwd] if cwd else [])
-                command = self.manager.remote_argv(remote)
-                self._launching = False
-                self._hand_over(lambda: subprocess.call(command), f"Resuming on {row.host}…",
-                                f"Run `4top --host {row.host} resume {row.key}` instead.", remote=True)
-                return
-            plan = await asyncio.to_thread(self.manager.resume, row.key, cwd)
+                argv, directory, env = manager.remote_argv(remote), str(Path.home()), {}
+            else:
+                plan = await asyncio.to_thread(manager.resume, row.key, cwd)
+                argv, directory, env = list(plan.argv), plan.cwd, plan.environment
         except (FourtopError, OSError, ValueError) as exc:
-            self._launching = False
+            self._busy(tag, None)
             self.set_status(str(exc))
             return
-        self._launching = False
-        self._hand_over(lambda: self.manager.run(plan), f"Resuming {plan.agent}…",
-                        f"Run `4top resume {row.key}` instead.")
+        name = first_line(row.title)[:24] or row.agent
+        await self._launch(tag, argv, directory, env, name, remote=manager.remote)
 
-    def _hand_over(self, action, message: str, fallback: str = "", remote: bool = False):
+    async def _launch(self, tag, argv, directory, env, name, remote=False):
+        if self.workspace:
+            try:
+                await asyncio.to_thread(self.workspace.open, tag, argv, directory, env, name)
+                self.opened = await asyncio.to_thread(self.workspace.panes)
+            except FourtopError as exc:
+                self.set_status(str(exc))
+            finally:
+                self._busy(tag, None)
+            return
+        self._busy(tag, None)
+        self._launching = True
+        try:
+            self._hand_over(lambda: subprocess.call(argv, cwd=directory, env=env or None),
+                            f"Opening {name}…", remote=remote)
+        finally:
+            self._launching = False
+
+    def _busy(self, tag: str, what: str | None):
+        if what is None:
+            self.busy.pop(tag, None)
+        else:
+            self.busy[tag] = what + "…"
+        self.render_list()
+
+    def action_new(self):
+        source = self.current_source()
+        if self.manager.demo:
+            self.set_status("DEMO is read-only. No agent will be started.")
+            return
+        row = self.current()
+        cwd = row.cwd if row and source is self.current_source() else os.getcwd()
+        if not source.manager.remote and not (row and Path(cwd).is_dir()):
+            cwd = os.getcwd()
+        self.push_screen(NewAgent(cwd, where=source.name),
+                         lambda values: self._new_result(source, values))
+
+    def _new_result(self, source, values):
+        if values:
+            self.run_worker(self._start(source, values))
+
+    async def _start(self, source, values):
+        agent, cwd = values
+        manager = source.manager
+        try:
+            if manager.remote:
+                argv = manager.remote_argv(["new", agent, "--cwd", cwd, "--yes"])
+                directory, env = str(Path.home()), {}
+            else:
+                plan = await asyncio.to_thread(manager.new, agent, cwd)
+                argv, directory, env = list(plan.argv), plan.cwd, plan.environment
+        except (FourtopError, OSError, ValueError) as exc:
+            self.push_screen(NewAgent(cwd, clean_text(str(exc)), values, source.name),
+                             lambda again: self._new_result(source, again))
+            return
+        tag = f"{source.name}:new-{int(time.time())}"
+        await self._launch(tag, argv, directory, env, f"new {agent}", remote=manager.remote)
+
+    def _hand_over(self, action, message: str, remote: bool = False):
         self.set_status(message)
         self._save_view()
         started, code = time.monotonic(), None
@@ -785,9 +987,11 @@ class FourtopApp(App[tuple | None]):
             with self.suspend():
                 code = action()
         except SuspendNotSupported:
-            self.set_status(f"This terminal cannot hand over control. {fallback}".strip())
+            self.set_status("This terminal cannot hand over control; run 4top in a real terminal.")
         except (FourtopError, OSError, ValueError) as exc:
             self.set_status(str(exc))
+        else:
+            self.set_status("")
         # A command that fails while the panel is suspended prints under a screen that
         # is repainted immediately, so the failure has to be reported here or not at all.
         if code and (remote or time.monotonic() - started < 2.0):
@@ -798,37 +1002,65 @@ class FourtopApp(App[tuple | None]):
     def _exit_note(code: int, remote: bool) -> str:
         if remote and code == 255:
             return ("ssh closed the connection (255). The session is unchanged in its transcript "
-                    "on that host: resume it again when the link is back.")
+                    "on that host: open it again when the link is back.")
         if remote:
             return f"the remote command exited {code}; the session is unchanged in its transcript."
         return f"the agent exited {code}."
 
     def action_help(self):
-        self.push_screen(Confirm("4top keys & safety", "\n".join((
-            "↑ / ↓: select   Enter: review native resume   /: search metadata",
-            "Ctrl-F: explicit full-content search   Space: read-only preview   i: details",
-            "n: new agent   H: switch host   r: refresh   q / Ctrl-C: close only the panel",
-            "Esc: close dialog, cancel full search or clear the query",
-            "Resume always starts a new process from the transcript.",
-            "Deep search reads only approved local sources and executes nothing.",
-            "No automatic restart, model calls, or telemetry.",
+        layout = ("Alt-← / Alt-→ or → : move between the list and the agent.\n"
+                  "Opened sessions keep running when you open another; ● marks them.\n"
+                  "q detaches: agents keep running, and 4top reattaches.  Q closes everything.\n"
+                  if self.workspace else
+                  "Enter runs the agent in this terminal; the list returns when it exits.\n"
+                  "Install tmux to keep the list beside the agent.\n")
+        self.push_screen(Info("4top", "\n".join((
+            "↑ ↓  select      Enter  open      Space  preview      i  details",
+            "/  search        p  project        [ ]  page within a machine",
+            "Ctrl-F  full-content search         n  new agent on the selected machine",
+            "f  fold the machine under the cursor.  r  refresh.  Esc  clear filters.",
+            "",
+            layout,
+            "Opening starts the agent again from its transcript.",
+            "4top makes no model calls and sends no telemetry.",
         ))))
 
     def _save_view(self):
-        # A remote key belongs to another machine's history, so the local view keeps
-        # only the local selection.
-        if not self.manager.demo and not self.manager.remote:
-            with contextlib.suppress(OSError, FourtopError):
-                self.manager.store.save_view(self.selected_key)
+        # A remote key belongs to another machine's history, so only a local selection
+        # is kept.
+        if self.manager.demo or not self.selected_key or not self.selected_key.startswith("local:"):
+            return
+        with contextlib.suppress(OSError, FourtopError, AttributeError):
+            self.manager.store.save_view(self.selected_key.split(":", 1)[1])
 
     def action_quit(self):
+        if self.workspace and not self._fourtop_closing:
+            self._save_view()
+            with contextlib.suppress(FourtopError):
+                self.workspace.detach()
+            return
+        self._close_panel()
+
+    def action_close_all(self):
+        if not self.workspace:
+            self._close_panel()
+            return
+        count = len(self.opened)
+        if not count:
+            self._close_panel(close=True)
+            return
+        self.push_screen(Confirm("Close everything", f"{count} open session(s) will be stopped. "
+                                 "Their transcripts are kept and can be opened again.",
+                                 destructive=True, confirm="Close all"),
+                         lambda yes: self._close_panel(close=True) if yes else None)
+
+    def _close_panel(self, close=False):
         self._save_view()
         self._fourtop_closing = True
         self._full_cancel.set()
-        self.manager.close()
+        for source in self.sources:
+            source.manager.close()
+        if close and self.workspace:
+            with contextlib.suppress(FourtopError):
+                self.workspace.close_all()
         self.exit(None)
-
-    def on_unmount(self):
-        self._fourtop_closing = True
-        self._full_cancel.set()
-        self.manager.close()

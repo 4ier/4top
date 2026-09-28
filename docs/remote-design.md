@@ -1,8 +1,8 @@
 # Remote hosts over SSH
 
-4top is bound to one machine at a time. `--host` points the whole panel at
-another machine you can already `ssh` into. Views are isolated rather than merged:
-the default scope is this machine, and a remote scope replaces it.
+The panel lists this machine and every configured host at once, one section
+each. `--host` scopes the panel, or any command, to a single machine you can
+already `ssh` into.
 
 ## Why ssh instead of an agent
 
@@ -60,16 +60,14 @@ ssh = "me@build-box"
 same placement rules as `--config`. `4top --host N doctor` reports the remote's own
 diagnosis plus the transport result, without writing on either side.
 
-## Switching in the panel
+## Every host in one panel
 
-`H` lists this machine and every configured host, and selecting one replaces the
-whole view: rows, selection and any running search belong to the previous scope
-and are dropped. A refresh that was in flight for the old scope is discarded
-rather than rendered into the new one. The scope is always named in the counts
-line.
-
-The saved selection is local-only, because a history key from another machine
-means nothing here.
+Each configured host is a section of the list with its own page, refresh interval
+and state line: `cached` while the first answer is on its way, `unreachable` when
+the host cannot be asked (its last rows stay), `partial` when it reported issues.
+Rows keep the host they came from, and an action goes to that host. The saved
+selection is local-only, because a history key from another machine means nothing
+here.
 
 ## Deploying and updating the remote side
 

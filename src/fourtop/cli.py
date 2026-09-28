@@ -174,7 +174,15 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
             if not sys.stdin.isatty() or not sys.stdout.isatty():
                 raise Dependency("A terminal is required. Use `4top list --json` for scripts.")
             from .app import FourtopApp
-            FourtopApp(manager, no_color=args.no_color or "NO_COLOR" in os.environ).run()
+            from .workspace import Workspace, enter
+            if not manager.demo:
+                enter(manager.config, sys.argv[1:])  # becomes the tmux client unless plain
+            hosts = []
+            if not manager.demo and not manager.remote:
+                hosts = [Manager(manager.config, host) for host in manager.config.hosts.values()]
+            workspace = None if manager.demo else Workspace.current(manager.config.environment)
+            FourtopApp(manager, no_color=args.no_color or "NO_COLOR" in os.environ, hosts=hosts,
+                       workspace=workspace).run()
             return 0
         if command in ("list", "search"):
             snapshot = (manager.search(args.query, args.full) if command == "search"

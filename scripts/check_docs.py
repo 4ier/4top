@@ -22,7 +22,9 @@ sys.path.insert(0, str(ROOT / "src"))
 # Vocabulary from a design that no longer exists. Leaving it in the tree costs a
 # reader attention on every pass, and git history is where the lesson belongs.
 # Upper-case tokens are matched case-sensitively so ordinary prose stays readable.
-SUPERSEDED = (r"tmux", r"byobu", r"\bpty\b", r"\bpane\b", r"handoff", r"--socket",
+# tmux and its panes are back, but only as a layout: 4top again places agents in
+# panes, and still records nothing about whether they are alive.
+SUPERSEDED = (r"byobu", r"\bpty\b", r"handoff", r"--socket",
               r"--client", r"--detach", r"unix socket",
               r"\bLIVE\b", r"\bHIST\b", r"\bMISSING\b", r"\bUNKNOWN\b", r"\bEXIT\b")
 # Files that must name the removed vocabulary in order to look for it.

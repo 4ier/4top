@@ -2,20 +2,21 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from textual.widgets import DataTable, Input, Static
+from textual.widgets import Input, OptionList, Static
 
 from fourtop.app import (
-    WHEEL_ROWS,
     Confirm,
     Details,
     DirectoryPrompt,
     FourtopApp,
     NewAgent,
     Preview,
-    SessionTable,
+    ProjectPicker,
+    SessionList,
 )
 from fourtop.models import LaunchPlan
 from fourtop.services import DemoManager
+from fourtop.workspace import Pane
 
 
 class _ViewOnlyManager:
@@ -24,15 +25,31 @@ class _ViewOnlyManager:
     demo = False
     remote = False
     host = None
+    scope = "local"
 
     def __init__(self, view):
         self.config = SimpleNamespace(color="auto", refresh_seconds=1.0, history_refresh_seconds=5.0)
         self.store = SimpleNamespace(load_view=lambda: view)
 
 
+class LocalDemo(DemoManager):
+    """Demo rows behaving like this machine's own history: sessions can be opened."""
+
+    demo = False
+    store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
+
+    @property
+    def scope(self):
+        return "local"
+
+
+def status(app) -> str:
+    return str(app.query_one("#status", Static).render())
+
+
 def test_stored_selection_is_restored():
     assert FourtopApp(_ViewOnlyManager({})).selected_key is None
-    assert FourtopApp(_ViewOnlyManager({"selected": "h_keep"})).selected_key == "h_keep"
+    assert FourtopApp(_ViewOnlyManager({"selected": "h_keep"})).selected_key == "local:h_keep"
 
 
 @pytest.mark.asyncio
@@ -41,7 +58,7 @@ async def test_demo_keyboard_search_and_preview():
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
         assert len(app.shown) == 6
-        assert "6 sessions" in str(app.query_one("#counts", Static).render())
+        assert "DEMO" in str(app.query_one("#top", Static).render())
         await pilot.press("slash")
         app.query_one("#query", Input).value = "中文"
         await pilot.pause()
@@ -65,10 +82,8 @@ async def test_selection_survives_refresh_reorder_and_insertion():
         manager.rows.insert(0, replace(manager.rows[0], key="new-demo"))
         await app.refresh_rows()
         assert app.current().key == selected
-        assert app.selected_key == selected
         await pilot.resize_terminal(46, 16)
         await pilot.pause()
-        assert len(app._columns) == 2
         assert app.current().key == selected
         await pilot.press("q")
 
@@ -80,10 +95,12 @@ async def test_demo_mutations_are_disabled_and_raw_markup_not_rendered():
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        assert app.query_one(DataTable).get_cell("demo_1", "title").plain == "[red]literal[/red]"
+        listing = app.query_one(OptionList)
+        prompt = listing.get_option("demo:demo_1").prompt
+        assert "[red]literal[/red]" in prompt.plain and "\x1b" not in prompt.plain
         await pilot.press("n")
         assert not isinstance(app.screen, NewAgent)
-        assert "read-only" in str(app.query_one("#status", Static).render())
+        assert "read-only" in status(app)
         await pilot.press("i")
         assert isinstance(app.screen, Details)
         assert app.screen.query_one("#resume").disabled
@@ -96,7 +113,7 @@ async def test_confirmation_defaults_to_cancel():
     outcome = []
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause(.2)
-        app.push_screen(Confirm("Resume", "Exact target?", destructive=True), outcome.append)
+        app.push_screen(Confirm("Close", "Exact target?", destructive=True), outcome.append)
         await pilot.pause()
         assert app.focused.id == "cancel"
         await pilot.press("enter")
@@ -122,7 +139,7 @@ async def test_full_search_cancels_without_overwriting_newer_query():
         await pilot.pause(.1)
         app.query_one("#query", Input).value = "claude"
         await pilot.pause(.2)
-        assert app._full_keys is None
+        assert app.sources[0].full_keys is None
         assert all(row.agent == "claude" for row in app.shown)
         await pilot.press("escape", "q")
 
@@ -132,116 +149,155 @@ async def test_q_is_text_while_typing_in_search():
     app = FourtopApp(DemoManager())
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause(.2)
-        await pilot.press("slash", "q")
-        assert app.query_one("#query", Input).value == "q"
+        await pilot.press("slash", "q", "p")
+        assert app.query_one("#query", Input).value == "qp"
+        assert not isinstance(app.screen, ProjectPicker)
         await pilot.press("escape", "q")
 
 
 @pytest.mark.asyncio
-async def test_unchanged_rows_are_not_retexted(monkeypatch):
-    # Re-texting every cell of a large store on each refresh is what makes the
-    # table feel laggy, so unchanged rows must be skipped entirely.
-    import fourtop.app as app_module
-
-    calls = []
-    original = app_module.plain
-
-    def counting(value, **kwargs):
-        calls.append(str(value))
-        return original(value, **kwargs)
-
-    monkeypatch.setattr(app_module, "plain", counting)
-
+async def test_unchanged_rows_are_not_rebuilt():
+    # Rebuilding the whole list on every one-second tick is what makes a big store
+    # feel laggy; an unchanged view must leave the options alone.
     manager = DemoManager()
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        titles = {row.title for row in app.shown}
-        assert len(titles) == 6 and titles <= set(calls)  # rendered once for real
-
-        calls.clear()
-        app.render_rows()
-        app.render_rows()
-        assert not (titles & set(calls))  # unchanged rows are not re-texted
-
+        listing = app.query_one(OptionList)
+        before = listing.get_option("demo:demo_1")
+        app.render_list()
+        assert listing.get_option("demo:demo_1") is before
         manager.rows[0] = replace(manager.rows[0], title="changed title")
-        await app.refresh_rows()  # a real change must still repaint
-        assert "changed title" in calls
+        await app.refresh_rows()
+        assert "changed title" in listing.get_option("demo:demo_1").prompt.plain
         await pilot.press("q")
 
 
 @pytest.mark.asyncio
-async def test_enter_confirms_before_resuming_and_runs_the_plan(tmp_path):
+async def test_enter_opens_at_once_and_runs_the_plan(tmp_path):
+    # No confirmation dialog: Enter checks the session with its host, then opens it.
     calls = []
 
-    class RecordingDemo(DemoManager):
-        demo = False
-        store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
-
+    class Recording(LocalDemo):
         def resume(self, query, cwd=None):
             calls.append(("resume", query))
-            return LaunchPlan("pi", "/fake/pi", ("/fake/pi",), "/demo", {})
+            return LaunchPlan("pi", "/fake/pi", ("/fake/pi",), str(tmp_path), {})
 
-        def run(self, plan):
-            calls.append(("run", plan))
-            return 0
-
-    manager = RecordingDemo()
+    manager = Recording()
     manager.rows = [replace(row, cwd=str(tmp_path)) for row in manager.rows]
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        assert app.current().can_resume
         key = app.current().key
         await pilot.press("enter")
-        await pilot.pause()
-        assert isinstance(app.screen, Confirm)
-        assert calls == []  # nothing happens before explicit approval
-        app.screen.query_one("#confirm").press()
         await pilot.pause(.3)
+        assert not isinstance(app.screen, Confirm)
         assert calls == [("resume", key)]
         # A headless driver cannot hand the terminal over; it must say so instead of crashing.
-        assert "cannot hand over control" in str(app.query_one("#status", Static).render())
+        assert "cannot hand over control" in status(app)
         await pilot.press("q")
 
 
+class FakeWorkspace:
+    def __init__(self):
+        self.panes_by_tag, self.calls = {}, []
+
+    def ensure_layout(self, width):
+        self.calls.append(("layout", width))
+
+    def fit(self, width):
+        pass
+
+    def panes(self):
+        return dict(self.panes_by_tag)
+
+    def reap(self):
+        return []
+
+    def stage(self):
+        return "%1"
+
+    def open(self, tag, argv, cwd, env, name):
+        self.calls.append(("open", tag, tuple(argv), cwd))
+        self.panes_by_tag[tag] = Pane(f"%{len(self.panes_by_tag) + 2}", tag, False, None)
+
+    def show(self, pane):
+        self.calls.append(("show", pane))
+
+    def detach(self):
+        self.calls.append(("detach",))
+
+    def close_all(self):
+        self.calls.append(("close_all",))
+
+
 @pytest.mark.asyncio
-async def test_cursor_rows_are_preview_only():
+async def test_in_the_layout_a_session_opens_beside_the_list_and_stays_open(tmp_path):
+    class Recording(LocalDemo):
+        def resume(self, query, cwd=None):
+            return LaunchPlan("pi", "/fake/pi", ("/fake/pi", "--session", query), str(tmp_path), {})
+
+    manager = Recording()
+    manager.rows = [replace(row, cwd=str(tmp_path)) for row in manager.rows]
+    workspace = FakeWorkspace()
+    app = FourtopApp(manager, workspace=workspace)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(.3)
+        tag = f"local:{app.current().key}"
+        await pilot.press("enter")
+        await pilot.pause(.3)
+        assert ("open", tag, ("/fake/pi", "--session", app.current().key), str(tmp_path)) in workspace.calls
+        assert tag in app.opened
+        assert app.query_one(OptionList).get_option(tag).prompt.plain.startswith("● ")
+        # Opening it again shows the running one instead of starting a second.
+        await pilot.press("enter")
+        await pilot.pause(.2)
+        assert [call[0] for call in workspace.calls].count("open") == 1
+        assert workspace.calls[-1][0] == "show"
+        # q leaves the agents running and detaches; the panel stays alive in tmux.
+        await pilot.press("q")
+        await pilot.pause()
+        assert workspace.calls[-1] == ("detach",)
+        assert app.is_running
+        await pilot.press("Q")
+        await pilot.pause()
+        assert isinstance(app.screen, Confirm)
+        app.screen.query_one("#confirm").press()
+        await pilot.pause()
+    assert ("close_all",) in workspace.calls
+
+
+@pytest.mark.asyncio
+async def test_cursor_rows_are_read_only():
     app = FourtopApp(DemoManager())
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
         row = next(value for value in app.shown if value.agent == "cursor")
         assert not row.can_resume
-        app.selected_key = row.key
-        app.render_rows()
-        assert "Enter: preview" in str(app.query_one("#selection", Static).render())
+        assert "read-only" in app.query_one(OptionList).get_option(f"demo:{row.key}").prompt.plain
         await pilot.press("q")
 
 
 @pytest.mark.asyncio
-async def test_derived_labels_follow_row_changes():
+async def test_rows_follow_their_changes():
     manager = DemoManager()
     app = FourtopApp(manager)
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause(.2)
-        assert app.query_one(DataTable).get_cell("demo_1", "project").plain == "api-service"
+        assert "api-service" in app.query_one(OptionList).get_option("demo:demo_1").prompt.plain
         manager.rows[0] = replace(manager.rows[0], cwd="/demo/renamed-project")
         await app.refresh_rows()
-        # The cached project label must not outlive the row it was derived from.
-        assert app.query_one(DataTable).get_cell("demo_1", "project").plain == "renamed-project"
+        assert "renamed-project" in app.query_one(OptionList).get_option("demo:demo_1").prompt.plain
         await pilot.press("q")
 
 
 @pytest.mark.asyncio
-async def test_footer_has_no_key_and_status_says_nothing_when_there_is_nothing():
+async def test_status_says_nothing_when_there_is_nothing():
     app = FourtopApp(DemoManager())
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        selection = str(app.query_one("#selection", Static).render())
-        assert "Enter: preview" in selection
-        assert "demo_1" not in selection and "h_" not in selection
-        # DEMO labels itself, so the status line carries only that note.
-        assert "keeps nothing running" not in str(app.query_one("#status", Static).render())
+        assert not app.query_one("#status", Static).display
+        assert "open" in str(app.query_one("#keys", Static).render())
         await pilot.press("q")
 
 
@@ -252,18 +308,58 @@ async def test_wheel_moves_the_highlight_with_the_view():
     app = FourtopApp(DemoManager())
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        table = app.query_one(SessionTable)
-        assert table.cursor_row == 0
-        table._on_mouse_scroll_down(MouseScrollDown(table, 0, 0, 0, 1, 0, False, False, False))
+        listing = app.query_one(SessionList)
+        first = listing.highlighted
+        listing._on_mouse_scroll_down(MouseScrollDown(listing, 0, 0, 0, 1, 0, False, False, False))
         await pilot.pause()
-        assert table.cursor_row == WHEEL_ROWS
-        assert app.selected_key == app.shown[WHEEL_ROWS].key
-        table._on_mouse_scroll_up(MouseScrollUp(table, 0, 0, 0, 1, 0, False, False, False))
-        assert table.cursor_row == 0
-        # Clamped at both ends rather than scrolling the viewport away.
-        for _ in range(20):
-            table._on_mouse_scroll_up(MouseScrollUp(table, 0, 0, 0, 1, 0, False, False, False))
-        assert table.cursor_row == 0 and table.scroll_y == 0
+        assert listing.highlighted == first + 1
+        assert app.selected_key == app._ids[first + 1]
+        listing._on_mouse_scroll_up(MouseScrollUp(listing, 0, 0, 0, 1, 0, False, False, False))
+        assert listing.highlighted == first
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_machine_pages_through_its_sessions():
+    manager = DemoManager()
+    manager.rows = [replace(manager.rows[0], key=f"demo_{i}", title=f"task {i}") for i in range(30)]
+    app = FourtopApp(manager)
+    async with app.run_test(size=(80, 16)) as pilot:
+        await pilot.pause(.2)
+        size = app.page_size()
+        assert len(app.shown) == size < 30
+        first = [row.key for row in app.shown]
+        await pilot.press("right_square_bracket")
+        await pilot.pause()
+        assert [row.key for row in app.shown] == [f"demo_{i}" for i in range(size, 2 * size)]
+        assert f"2/{-(-30 // size)}" in app._header(app.sources[0], 30, -(-30 // size), 70).plain
+        await pilot.press("left_square_bracket")
+        await pilot.pause()
+        assert [row.key for row in app.shown] == first
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_project_filter_and_folding():
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        await pilot.press("p")
+        await pilot.pause()
+        assert isinstance(app.screen, ProjectPicker)
+        app.dismiss_value = None
+        app.screen.dismiss("api-service")
+        await pilot.pause()
+        assert {row.cwd for row in app.shown} == {"/demo/api-service"}
+        assert "project api-service" in str(app.query_one("#top", Static).render())
+        await pilot.press("escape")
+        await pilot.pause()
+        assert len(app.shown) == 6
+        # f folds the machine under the cursor; its name is not a row Enter can hit.
+        assert app.query_one(OptionList).get_option_at_index(0).disabled
+        await pilot.press("f")
+        await pilot.pause()
+        assert app.shown == [] and app.sources[0].collapsed
         await pilot.press("q")
 
 
@@ -271,10 +367,7 @@ async def test_wheel_moves_the_highlight_with_the_view():
 async def test_resume_asks_for_a_directory_when_the_recorded_one_is_gone(tmp_path):
     calls = []
 
-    class GoneDemo(DemoManager):
-        demo = False
-        store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
-
+    class GoneDemo(LocalDemo):
         def check(self, query):
             # What a real host would report for a session whose directory is gone.
             return {"key": query, "agent": "pi", "host": "local", "native_id": "x",
@@ -292,6 +385,7 @@ async def test_resume_asks_for_a_directory_when_the_recorded_one_is_gone(tmp_pat
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
+        key = app.current().key
         await pilot.press("enter")
         await pilot.pause(.2)
         assert isinstance(app.screen, DirectoryPrompt)
@@ -302,7 +396,7 @@ async def test_resume_asks_for_a_directory_when_the_recorded_one_is_gone(tmp_pat
         app.screen.query_one("#cwd", Input).value = str(tmp_path)
         app.screen.query_one("#use").press()
         await pilot.pause(.3)
-        assert calls == [(app.shown[0].key, str(tmp_path))], "the chosen directory is used"
+        assert calls == [(key, str(tmp_path))], "the chosen directory is used"
         await pilot.press("q")
 
 
@@ -319,20 +413,13 @@ async def test_a_refused_preflight_is_shown_and_nothing_is_started():
     # The failure that used to flash past under a repainted panel.
     calls = []
 
-    class BrokenDemo(DemoManager):
-        demo = False
-        store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None)
-
+    class BrokenDemo(LocalDemo):
         def check(self, query):
             return {"key": query, "agent": "pi", "host": "ubuntu", "native_id": "x",
                     "cwd": "/home/fourier/code/x", "cwd_quality": "native", "executable": None,
                     "cwd_missing": False, "resumable": False,
                     "reason": "pi executable not found; install it or configure a real wrapper path",
                     "status": "available", "problems": []}
-
-        def run(self, plan):
-            calls.append(plan)
-            return 0
 
         def resume(self, query, cwd=None):
             calls.append(query)
@@ -343,9 +430,9 @@ async def test_a_refused_preflight_is_shown_and_nothing_is_started():
         await pilot.pause(.3)
         await pilot.press("enter")
         await pilot.pause(.4)
-        assert calls == [], "a refused session must not reach a hand-over"
-        assert not isinstance(app.screen, Confirm)
-        assert "pi executable not found" in str(app.query_one("#status", Static).render())
+        assert calls == [], "a refused session must not be started"
+        assert "pi executable not found" in status(app)
+        assert not app.busy
         await pilot.press("q")
 
 
@@ -362,10 +449,10 @@ async def test_a_failed_hand_over_reports_its_exit_code():
             yield  # a headless driver cannot really suspend; run the action anyway
 
         app.suspend = fake_suspend
-        app._hand_over(lambda: 255, "Resuming on ubuntu…", remote=True)
+        app._hand_over(lambda: 255, "Opening on ubuntu…", remote=True)
         await pilot.pause(.2)
-        status = str(app.query_one("#status", Static).render())
-        assert "255" in status and "transcript" in status
+        text = status(app)
+        assert "255" in text and "transcript" in text
         await pilot.press("q")
 
 
@@ -373,5 +460,4 @@ def test_exit_notes_distinguish_a_dropped_link():
     app = FourtopApp(DemoManager())
     assert "ssh closed the connection (255)" in app._exit_note(255, True)
     assert "remote command exited 5" in app._exit_note(5, True)
-    assert app._exit_note(0, True) is None or True
     assert "agent exited 130" in app._exit_note(130, False)

@@ -159,26 +159,6 @@ def test_control_path_lives_in_private_state(lab):
     assert stat.S_IMODE((lab.config.state_dir / "ssh").stat().st_mode) == 0o700
 
 
-@pytest.mark.asyncio
-async def test_remote_scope_panel_shows_remote_rows(remote):
-    from textual.widgets import DataTable, Static
-
-    from fourtop.app import FourtopApp
-    from fourtop.services import Manager
-
-    load, rows = remote
-    config, host = load()
-    manager = Manager(config, host)
-    app = FourtopApp(manager)
-    async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.pause(3)
-        assert app.manager.remote
-        assert [row.host for row in app.shown] == ["venus"]
-        assert "venus" in str(app.query_one("#counts", Static).render())
-        assert app.query_one(DataTable).get_cell("h_abc", "agent").plain == "pi"
-        await pilot.press("q")
-    manager.close()
-
 
 def test_a_login_banner_is_not_an_issue(remote, tmp_path):
     # A remote host may print a MOTD before our command runs. That describes the
@@ -192,79 +172,7 @@ def test_a_login_banner_is_not_an_issue(remote, tmp_path):
     assert _issues(host, "Welcome to the server.\n", 6) == ["venus: the remote reported a partial result"]
 
 
-@pytest.mark.asyncio
-async def test_panel_switches_between_local_and_a_configured_host(remote):
-    from textual.widgets import OptionList, Static
 
-    from fourtop.app import FourtopApp, HostPicker
-    from fourtop.services import Manager
-
-    load, _ = remote
-    config, _ = load()
-    app = FourtopApp(Manager(config))
-    async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.pause(.3)
-        assert not app.manager.remote
-        await pilot.press("H")
-        await pilot.pause()
-        assert isinstance(app.screen, HostPicker)
-        options = app.screen.query_one("#hosts", OptionList)
-        assert [option.id for option in options.options] == ["", "venus"]
-
-        options.highlighted = 1
-        await pilot.press("enter")
-        await pilot.pause(1)
-        assert app.manager.remote and app.manager.scope == "venus"
-        assert [row.host for row in app.shown] == ["venus"]
-        assert "venus" in str(app.query_one("#counts", Static).render())
-
-        await pilot.press("H")
-        await pilot.pause()
-        app.screen.query_one("#hosts", OptionList).highlighted = 0
-        await pilot.press("enter")
-        await pilot.pause(1)
-        assert not app.manager.remote
-        assert app.manager.scope == "local"
-        await pilot.press("q")
-
-
-@pytest.mark.asyncio
-async def test_host_picker_explains_an_empty_configuration(lab):
-    from textual.widgets import Static
-
-    from fourtop.app import FourtopApp, HostPicker
-    from fourtop.services import Manager
-
-    app = FourtopApp(Manager(lab.config))
-    async with app.run_test(size=(100, 30)) as pilot:
-        await pilot.pause(.3)
-        await pilot.press("H")
-        await pilot.pause()
-        assert not isinstance(app.screen, HostPicker)
-        assert "No [hosts.NAME] entries" in str(app.query_one("#status", Static).render())
-        await pilot.press("q")
-
-
-@pytest.mark.asyncio
-async def test_host_switch_does_not_keep_a_remote_selection(lab):
-    # A remote key belongs to another machine, so it must not become the saved
-    # local selection.
-    from fourtop.app import FourtopApp
-    from fourtop.services import Manager
-
-    saved = []
-    config = lab.config
-    config.hosts = {}
-    manager = Manager(config)
-    manager.store.__dict__["save_view"] = saved.append
-    app = FourtopApp(manager)
-    async with app.run_test(size=(100, 30)) as pilot:
-        await pilot.pause(.3)
-        app.selected_key = "h_remote"
-        app.manager.remote = True
-        app.action_quit()
-        await pilot.pause()
-    assert saved == []
 
 
 def test_remote_check_reports_a_refusal(remote):
@@ -375,26 +283,6 @@ def test_remote_queries_ask_ssh_to_compress(lab):
     assert "Compression=yes" in argv
 
 
-@pytest.mark.asyncio
-async def test_panel_switches_from_one_host_to_another(remote):
-    # Switching compared "is remote" with "is remote", so going from one host to
-    # another host was taken for "already there" and silently ignored.
-    from fourtop.app import FourtopApp
-    from fourtop.services import Manager
-
-    load, _ = remote
-    config, _ = load()
-    lab_config = config.resolve_host("venus")
-    config.hosts["mars"] = type(lab_config)(name="mars", ssh="me@mars")
-    app = FourtopApp(Manager(config, lab_config))
-    async with app.run_test(size=(120, 30)) as pilot:
-        await pilot.pause(.5)
-        app._switch_to("mars")
-        await pilot.pause(1)
-        assert app.manager.scope == "mars"
-        assert [row.host for row in app.shown] == ["mars"]
-        await pilot.press("q")
-
 
 def test_a_host_opens_with_its_last_rows_before_it_answers(remote):
     from fourtop.services import Manager
@@ -413,3 +301,57 @@ def test_a_host_opens_with_its_last_rows_before_it_answers(remote):
     with pytest.raises(Unavailable):
         again.snapshot()
     again.close()
+
+
+
+@pytest.mark.asyncio
+async def test_every_configured_host_is_listed_at_once(remote):
+    # No host switching: local and every configured host each get a section.
+    from fourtop.app import FourtopApp
+    from fourtop.services import Manager
+
+    load, _ = remote
+    config, host = load()
+    app = FourtopApp(Manager(config), hosts=[Manager(config, host)])
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(1.5)
+        assert [source.name for source in app.sources] == ["local", "venus"]
+        assert "venus:h_abc" in app._rows
+        assert app._rows["venus:h_abc"][1].host == "venus"
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_host_keeps_its_section_and_says_so(remote):
+    from fourtop.app import FourtopApp
+    from fourtop.services import Manager
+
+    load, _ = remote
+    config, host = load(mode="fail")
+    app = FourtopApp(Manager(config), hosts=[Manager(config, host)])
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(1.5)
+        venus = app.sources[1]
+        assert venus.stale and "venus" in venus.stale
+        header = app._header(venus, 0, 1, 80).plain
+        assert "unreachable" in header
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_remote_selection_is_not_saved_as_the_local_one(lab):
+    # A remote key belongs to another machine, so it must not become the saved
+    # local selection.
+    from fourtop.app import FourtopApp
+    from fourtop.services import Manager
+
+    saved = []
+    manager = Manager(lab.config)
+    manager.store.__dict__["save_view"] = saved.append
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.3)
+        app.selected_key = "venus:h_remote"
+        app.action_quit()
+        await pilot.pause()
+    assert saved == []
