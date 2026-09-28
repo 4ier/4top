@@ -12,6 +12,7 @@ import threading
 import time
 from pathlib import Path
 
+from session_ls import _injected
 from session_ls.api import (
     HistoryIndex,
     HistoryRecord,
@@ -26,7 +27,15 @@ from session_ls.api import (
 from .agents import Drivers
 from .config import Config, Host
 from .errors import Conflict, FourtopError, Missing
-from .hosts import remote_check, remote_preview, remote_search, remote_snapshot, rows_of, ssh_argv
+from .hosts import (
+    remote_check,
+    remote_preview,
+    remote_preview_tail,
+    remote_search,
+    remote_snapshot,
+    rows_of,
+    ssh_argv,
+)
 from .models import LaunchPlan, Session, Snapshot
 from .state import StateStore
 from .sync import SyncState
@@ -47,7 +56,7 @@ def unique(items, query: str, keys):
 def row_for(record: HistoryRecord, host: str = "local") -> Session:
     return Session(record.key, record.agent, record.cwd, record.title, record.started, record.last,
                    host, record.file, record.status, tuple(record.problems), record.can_resume,
-                   None, record)
+                   None, record, bool(getattr(record, "subagent", False)))
 
 
 def slice_rows(rows: list[Session], query: str = "", agent=None, project=None) -> list[Session]:
@@ -157,6 +166,37 @@ class Manager:
             body += "\n\n" + "\n".join(page.issues)
         return page.label, body, page.next_cursor
 
+    def preview_tail(self, row: Session, before: int | None = None):
+        """The latest messages of a session, oldest first, and where the page of
+        earlier ones ends (None at the start of the transcript).
+
+        The opening of a transcript is mostly injected context (instructions,
+        environment, attached files), so a preview starts from the end, where the
+        conversation is, and pages backwards.
+        """
+        if self.host is not None:
+            return remote_preview_tail(self.config, self.host, row, before)
+        if row.record is None:
+            row = self.resolve_row(row.key)
+        if row.record is None:
+            raise Missing("No readable native transcript is associated with this row")
+        end = os.path.getsize(row.record.file) if before is None else max(0, before)
+        # Tool output dwarfs conversation in most transcripts, so keep reading
+        # backwards until there is something to read or the budget is spent.
+        lines, issues, start = [], [], end
+        while start > 0 and len(lines) < PREVIEW_TAIL_MESSAGES and end - start < PREVIEW_TAIL_BUDGET:
+            chunk_end, start = start, max(0, start - PREVIEW_TAIL_BYTES)
+            page = excerpt(row.record, start, max_bytes=chunk_end - start, max_lines=10**6)
+            lines = [line for line in page.lines if not _injected_line(line)] + lines
+            # Starting mid-file cuts the first line in half; that is expected, not damage.
+            issues += [issue for issue in page.issues if not (start and "partial" in issue)]
+        lines = lines[-self.config.preview_max_lines:]
+        body = "\n\n".join(lines) or "No conversation text in this part of the transcript."
+        if issues:
+            body += "\n\n" + "\n".join(dict.fromkeys(issues))
+        label = f"{row.agent} · latest messages" + (" · Earlier loads more" if start else "")
+        return label, body, start or None
+
     def check(self, query: str) -> dict:
         """Would a resume work, and if not, why? Read-only: no process is planned.
 
@@ -224,6 +264,17 @@ class Manager:
         self.stop_event.set()
 
 
+PREVIEW_TAIL_BYTES = 2**18
+PREVIEW_TAIL_MESSAGES = 10
+PREVIEW_TAIL_BUDGET = 2**21
+
+
+def _injected_line(line: str) -> bool:
+    """A user message that is context an agent or a bridge injected, not typed."""
+    role, _, text = line.partition(": ")
+    return role == "user" and _injected(text)
+
+
 class DemoManager:
     """Read-only sample data. Reads no configuration, history or state."""
 
@@ -276,6 +327,10 @@ class DemoManager:
                 "cwd_missing": False, "resumable": row.can_resume,
                 "reason": None if row.can_resume else "DEMO is read-only",
                 "status": row.status, "problems": []}
+
+    def preview_tail(self, row, before=None):
+        label, body, _ = self.preview(row)
+        return label, body, None
 
     def preview(self, row, cursor=0):
         return "DEMO — synthetic terminal preview", (

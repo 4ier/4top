@@ -176,37 +176,46 @@ class DirectoryPrompt(ModalScreen[str | None]):
 
 
 class Preview(ModalScreen):
-    BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close"), ("space", "close", "Close")]
+    """The latest messages first, like the end of a chat; Earlier pages back."""
+
+    BINDINGS = [("escape", "close", "Close"), ("q", "close", "Close"), ("space", "close", "Close"),
+                ("e", "earlier", "Earlier")]
 
     def __init__(self, manager, row: Session):
         super().__init__()
         self.manager, self.row = manager, row
-        self.cursor = 0
+        self.earlier: int | None = None
+        self.parts: list[str] = []
         self.loading = False
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog preview-dialog"):
-            yield Static("Loading read-only preview…", id="preview-title", classes="dialog-title")
+            yield Static("Loading the latest messages…", id="preview-title", classes="dialog-title")
             with VerticalScroll(id="preview-scroll"):
                 yield Static("", id="preview-body")
             with Horizontal(classes="buttons"):
+                yield Button("Earlier", id="earlier", disabled=True)
                 yield Button("Close", id="close")
-                yield Button("Next page", id="next", disabled=True)
 
     async def on_mount(self):
-        await self.load_page()
+        await self.load(None)
 
-    async def load_page(self):
+    async def load(self, before):
         if self.loading:
             return
         self.loading = True
         try:
-            title, body, cursor = await asyncio.to_thread(self.manager.preview, self.row, self.cursor)
+            title, body, earlier = await asyncio.to_thread(self.manager.preview_tail, self.row, before)
+            self.parts.insert(0, body)
+            self.earlier = earlier
             self.query_one("#preview-title", Static).update(plain(title))
-            self.query_one("#preview-body", Static).update(plain(body, multiline=True))
-            self.cursor = cursor
-            self.query_one("#next", Button).disabled = cursor is None
-            self.query_one("#preview-scroll", VerticalScroll).scroll_home(animate=False)
+            self.query_one("#preview-body", Static).update(plain("\n\n".join(self.parts), multiline=True))
+            self.query_one("#earlier", Button).disabled = earlier is None
+            scroll = self.query_one("#preview-scroll", VerticalScroll)
+            if before is None:
+                self.call_after_refresh(scroll.scroll_end, animate=False)
+            else:
+                self.call_after_refresh(scroll.scroll_home, animate=False)
         except (FourtopError, OSError, ValueError) as exc:
             self.query_one("#preview-body", Static).update(plain(str(exc)))
         finally:
@@ -214,10 +223,14 @@ class Preview(ModalScreen):
 
     @on(Button.Pressed)
     async def pressed(self, event: Button.Pressed):
-        if event.button.id == "next" and self.cursor is not None:
-            await self.load_page()
+        if event.button.id == "earlier":
+            await self.action_earlier()
         elif event.button.id == "close":
             self.dismiss()
+
+    async def action_earlier(self):
+        if self.earlier is not None:
+            await self.load(self.earlier)
 
     def action_close(self):
         self.dismiss()
@@ -336,6 +349,7 @@ class FourtopApp(App[tuple | None]):
         Binding("right_square_bracket", "page(1)", "Next page"),
         Binding("left_square_bracket", "page(-1)", "Previous page"),
         Binding("right", "stage", "Agent"), Binding("f", "fold", "Fold"),
+        Binding("a", "subagents", "Subagents"),
         Binding("ctrl+f", "full_search", "Full content"), Binding("r", "refresh", "Refresh"),
         Binding("question_mark", "help", "Help"),
     ]
@@ -380,6 +394,7 @@ class FourtopApp(App[tuple | None]):
         self._following_top = True
         self._placed: str | None = None
         self.project_filter: str | None = None
+        self.show_subagents = False
         self.opened: dict[str, object] = {}  # tag -> tmux pane, as tmux reports it
         self.busy: dict[str, str] = {}  # tag -> what is happening to it right now
         self._signature = None
@@ -524,7 +539,9 @@ class FourtopApp(App[tuple | None]):
                 (row.title, row.cwd, row.agent, row.key)).casefold() for term in terms)]
         if self.project_filter:
             rows = [row for row in rows if project(row.cwd) == self.project_filter]
-        return [row for row in rows if not getattr(row, "subagent", False)]
+        if self.show_subagents:
+            return rows
+        return [row for row in rows if not row.subagent]
 
     def page_sizes(self, visible: dict[int, list[Session]]) -> dict[int, int]:
         """Rows per machine. A machine with few sessions takes only what it needs and
@@ -652,6 +669,8 @@ class FourtopApp(App[tuple | None]):
             filters.append(f"“{query}”")
         if any(source.full_keys is not None for source in self.sources):
             filters.append("full content")
+        if self.show_subagents:
+            filters.append("with subagents")
         top = Text("4top", style="bold")
         if self.manager.demo:
             top.append("  DEMO · synthetic data, no real processes", style="bold yellow")
@@ -769,6 +788,15 @@ class FourtopApp(App[tuple | None]):
             source.full_keys = None
         self._status_message = ""
         self.query_one("#list", OptionList).focus()
+        self.render_list()
+
+    def action_subagents(self):
+        """Show or hide sessions that agents started for themselves."""
+        if isinstance(self.focused, Input):
+            return
+        self.show_subagents = not self.show_subagents
+        for source in self.sources:
+            source.page = 0
         self.render_list()
 
     def action_project(self):
@@ -1018,7 +1046,8 @@ class FourtopApp(App[tuple | None]):
             "↑ ↓  select      Enter  open      Space  preview      i  details",
             "/  search        p  project        [ ]  page within a machine",
             "Ctrl-F  full-content search         n  new agent on the selected machine",
-            "f  fold the machine under the cursor.  r  refresh.  Esc  clear filters.",
+            "f  fold the machine under the cursor.  a  show sessions agents started for",
+            "themselves (hidden by default).  r  refresh.  Esc  clear filters.",
             "",
             layout,
             "Opening starts the agent again from its transcript.",

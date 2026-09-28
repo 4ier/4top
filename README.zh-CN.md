@@ -55,11 +55,14 @@ Enter 会把它切回来。`Alt-←` / `Alt-→`（或在列表里按 `→`、�
 | `→`, `Alt-←` / `Alt-→` | 切到 agent / 在列表与 agent 之间切换（tmux 布局） |
 | `[` / `]` | 光标所在机器的上一页 / 下一页 |
 | `/`, `Enter`, `Esc` | 搜索元数据、回到列表、清除搜索和筛选 |
-| `p`, `f` | 只看一个项目；折叠光标所在的机器 |
+| `p`, `f`, `a` | 只看一个项目；折叠光标所在的机器；显示子会话 |
 | `Ctrl-F` | 明确触发全文搜索；`Esc` 取消 |
-| `Space`, `i` | 只读预览、详情 |
+| `Space`, `i` | 最近的消息（只读，`e` 往前翻）、详情 |
 | `n`, `r`, `?` | 在选中的机器上新建 agent、刷新、帮助 |
 | `q`, `Q`, `Ctrl-C` | 脱离（tmux）或退出；关闭全部 agent 并退出 |
+
+agent 为自己启动的会话（Codex 的审批复核、派生的 worker）默认隐藏，按 `a` 显示。
+预览从最近的消息开始，而不是转录开头那段注入的上下文。
 
 普通文字匹配支持中文和带引号的词组，多个词按 AND 匹配，不执行正则或历史内容。
 全文搜索只读已配置来源，明确报告部分扫描结果。
@@ -116,6 +119,7 @@ ssh = "me@build-box"                 # 任意 ssh 目标，包括 tailnet 名称
 4top search 'retry "database timeout"'    # 元数据匹配
 4top search '中文' --full                  # 解码后的全文搜索
 4top preview h_<key>                      # 一页只读摘录
+4top preview h_<key> --tail               # 改为最近的消息
 4top check h_<key> --json                 # 这个会话在这里能不能恢复，不能则给出原因
 4top new codex -- --model MODEL           # 原生参数放在 -- 之后
 4top resume h_<key> --yes                 # 把这个进程换成该 agent

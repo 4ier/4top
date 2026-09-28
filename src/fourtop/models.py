@@ -63,6 +63,9 @@ class Session:
     can_resume: bool = True
     issue: str | None = None
     record: HistoryRecord | None = field(default=None, repr=False, compare=False)
+    # A session another agent session started for itself, such as Codex's approval
+    # reviewer or a spawned worker. Hidden by default: nobody resumes those by hand.
+    subagent: bool = False
 
     def json(self) -> dict[str, Any]:
         result = asdict(self)

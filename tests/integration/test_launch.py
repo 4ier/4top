@@ -145,3 +145,34 @@ def test_configured_arguments_join_every_launch_but_cannot_retarget_it(lab):
     from fourtop.errors import FourtopError
     with pytest.raises(FourtopError):
         Manager(retarget).resume(native)
+
+
+def test_preview_starts_at_the_latest_messages_and_pages_back(lab):
+    native = "22222222-3333-4444-5555-666666666666"
+    codex_file = (Path(lab.config.root("codex").path) / "sessions/2026/09/24"
+                  / ("rollout-2026-09-24-" + native + ".jsonl"))
+    codex_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def message(role, text):
+        kind = "input_text" if role == "user" else "output_text"
+        return json.dumps({"type": "response_item", "payload": {
+            "role": role, "content": [{"type": kind, "text": text}]}}) + "\n"
+    noise = json.dumps({"type": "response_item", "payload": {"type": "function_call_output",
+                                                            "output": "x" * 300_000}}) + "\n"
+    lines = [json.dumps({"type": "session_meta", "payload": {
+        "id": native, "cwd": str(lab.path), "timestamp": "2026-09-24T00:00:00Z"}}) + "\n",
+        message("user", "# AGENTS.md instructions for /repo\n\nbe careful"),
+        message("user", "first real question")]
+    lines += [noise, message("assistant", "an early answer")]
+    lines += [message("user", f"question {i}") for i in range(12)]
+    codex_file.write_text("".join(lines))
+    from fourtop.services import Manager
+    manager = Manager(lab.config)
+    row = manager.resolve_row(manager.resolve_history(native).key)
+    label, body, earlier = manager.preview_tail(row)
+    assert "latest" in label
+    assert body.rstrip().endswith("user: question 11"), "the newest message is last"
+    assert "AGENTS.md" not in body, "injected context is not conversation"
+    assert earlier is not None and earlier > 0
+    older = manager.preview_tail(row, earlier)[1]
+    assert "an early answer" in older or "first real question" in older
