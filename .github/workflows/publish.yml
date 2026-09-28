@@ -117,11 +117,13 @@ jobs:
           exit 1
 
   release:
-    needs: publish
+    needs: [verify, publish]
     # Only a tag is a release; the manual trigger rehearses the build and the gate.
-    # A skipped publish (the version already exists) still deserves a release.
+    # A skipped publish (the version already exists) still deserves a release, but
+    # publish is also skipped when the gate refuses, and that must not become one:
+    # v0.2.0a5's first run reached this job after the gate had said no.
     if: |
-      !cancelled() && github.event_name == 'push' &&
+      !cancelled() && github.event_name == 'push' && needs.verify.result == 'success' &&
       (needs.publish.result == 'success' || needs.publish.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
