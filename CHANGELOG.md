@@ -6,7 +6,11 @@
   `-w` is an idle timeout as well, and the previous release used it on the
   connection itself. Reachability is now probed with it and the connection is made
   without it. Found on the tablet: a remote pi exited 255 eight seconds after opening.
-
+- From the tablet walk-through: a refresh no longer moves rows during input (it waits
+  three seconds after the last key or tap, and what Enter acts on stays what is on
+  screen); preview, details and help take the whole window in the layout; help
+  fits a 40-column list; an "Ended" note clears when the session is opened again;
+  parser notes no longer appear inside a preview.
 - Rows say what each session is doing: `⟳ working`, `▶ your turn`, or `✗ stopped`
   (mid-turn but silent for ten minutes), for sessions active in the last day. A
   third line shows the latest request when it differs from the first, and the git
