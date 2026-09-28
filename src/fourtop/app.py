@@ -601,6 +601,8 @@ class FourtopApp(App[tuple | None]):
             if source.collapsed:
                 continue
             page = visible[source.page * size:(source.page + 1) * size]
+            if not page and source.loaded and not source.snapshot.rows and not source.stale:
+                continue  # an empty machine is said by its header ("· 0"); no row needed
             if not page:
                 note = ("loading…" if not source.loaded else
                         "no match" if len(source.snapshot.rows) else "no sessions")

@@ -150,6 +150,8 @@ class Workspace:
     def ensure_layout(self, width: int) -> None:
         self.stage()
         self.fit(width)
+        if width < NARROW:
+            self.focus_panel()  # a narrow screen starts with the list alone
 
     def fit(self, width: int) -> None:
         """Give the list a readable width and the agent the rest."""
