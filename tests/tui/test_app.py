@@ -461,3 +461,18 @@ def test_exit_notes_distinguish_a_dropped_link():
     assert "ssh closed the connection (255)" in app._exit_note(255, True)
     assert "remote command exited 5" in app._exit_note(5, True)
     assert "agent exited 130" in app._exit_note(130, False)
+
+
+@pytest.mark.asyncio
+async def test_sessions_agents_started_for_themselves_are_hidden_until_asked():
+    manager = DemoManager()
+    manager.rows[1] = replace(manager.rows[1], subagent=True)
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        assert manager.rows[1].key not in {row.key for row in app.shown}
+        await pilot.press("a")
+        await pilot.pause()
+        assert manager.rows[1].key in {row.key for row in app.shown}
+        assert "with subagents" in str(app.query_one("#top", Static).render())
+        await pilot.press("q")

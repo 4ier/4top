@@ -355,3 +355,35 @@ async def test_a_remote_selection_is_not_saved_as_the_local_one(lab):
         app.action_quit()
         await pilot.pause()
     assert saved == []
+
+
+def test_an_older_host_previews_its_first_page_instead(remote):
+    # `preview --tail` is new; argparse on an older host refuses it with exit 2.
+    load, rows = remote
+    rows.write_text("user: hello from the first page\n")
+    config, host = load()
+    from fourtop import hosts
+    calls = []
+    real = hosts.run_remote
+
+    def older(config, host, args):
+        calls.append(args)
+        if "--tail" in args:
+            return 2, "", "4top: error: unrecognized arguments: --tail --json"
+        return real(config, host, args)
+    hosts.run_remote = older
+    try:
+        row = parse_rows(host, payload())[0]
+        label, body, earlier = hosts.remote_preview_tail(config, host, row)
+    finally:
+        hosts.run_remote = real
+    assert "hello from the first page" in body and earlier is None
+    assert calls[0][:3] == ["preview", "h_abc", "--tail"] and "--tail" not in calls[1]
+
+
+def test_a_subagent_flag_survives_the_wire(remote):
+    load, _ = remote
+    _, host = load()
+    rows = parse_rows(host, payload(subagent=True) + payload(key="h_def"))
+    assert [row.subagent for row in rows] == [True, False]
+    assert rows[0].json()["subagent"] is True

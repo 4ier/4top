@@ -128,7 +128,8 @@ def row_from(host: Host, payload: dict, number: int = 0) -> Session:
             status=str(payload.get("status", "available")),
             problems=tuple(str(value) for value in payload.get("problems", ())),
             can_resume=bool(payload.get("can_resume", False)),
-            issue=payload.get("issue") if isinstance(payload.get("issue"), str) else None)
+            issue=payload.get("issue") if isinstance(payload.get("issue"), str) else None,
+            subagent=payload.get("subagent") is True)
     except (KeyError, TypeError, ValueError):
         raise Unavailable(f"{host.name}: row {number} is missing required fields") from None
 
@@ -228,6 +229,25 @@ def remote_preview(config: Config, host: Host, key: str, cursor: int = 0) -> str
     if code not in (0, 6):
         raise ssh_failure(host, code, err)
     return out
+
+
+def remote_preview_tail(config: Config, host: Host, row: Session, before: int | None = None):
+    """The latest messages on the host that owns the session. A host older than
+    `preview --tail` gets the plain first page instead."""
+    args = ["preview", row.key, "--tail", "--json"] + (["--before", str(before)] if before else [])
+    code, out, err = run_remote(config, host, args)
+    if code == 2 and "--tail" in err:
+        text = remote_preview(config, host, row.key)
+        return f"{row.agent} · {host.name} (read-only)", clean_text(text, multiline=True)[:2**18], None
+    if code not in (0, 6):
+        raise ssh_failure(host, code, err)
+    try:
+        page = json.loads(out)
+        earlier = page.get("earlier_cursor")
+        return (clean_text(str(page["label"])), clean_text(str(page["body"]), multiline=True)[:2**18],
+                earlier if isinstance(earlier, int) else None)
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise Unavailable(f"{host.name}: preview did not return JSON") from None
 
 
 def remote_check(config: Config, host: Host, key: str) -> dict:

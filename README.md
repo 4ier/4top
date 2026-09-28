@@ -86,11 +86,15 @@ the list returns when it exits.
 | `→`, `Alt-←` / `Alt-→` | Move to the agent / between list and agent (tmux layout) |
 | `[` / `]` | Previous / next page of the machine under the cursor |
 | `/`, `Enter`, `Esc` | Search metadata, return to the list, clear search and filters |
-| `p`, `f` | Show one project; fold the machine under the cursor |
+| `p`, `f`, `a` | Show one project; fold the machine under the cursor; show subagent sessions |
 | `Ctrl-F` | Explicit literal full-content search; `Esc` cancels |
-| `Space`, `i` | Read-only preview, details |
+| `Space`, `i` | Latest messages (read-only; `e` for earlier), details |
 | `n`, `r`, `?` | New agent on the selected machine, refresh, help |
 | `q`, `Q`, `Ctrl-C` | Detach (tmux) or quit; close all agents and quit |
+
+Sessions an agent started for itself (Codex's approval reviewer, spawned workers)
+are hidden until you press `a`. The preview opens at the latest messages, where the
+conversation is, rather than at the injected context a transcript begins with.
 
 Search supports case-insensitive words and quoted phrases; all terms must match.
 Full search decodes JSON text, including Chinese escaped as `\u....`. It reads
@@ -164,6 +168,7 @@ than a hang, and the session stays in its transcript to be resumed again.
 4top search 'retry "database timeout"'    # metadata match
 4top search '中文' --full                  # decoded full-content search
 4top preview h_<key>                      # one bounded read-only page
+4top preview h_<key> --tail               # the latest messages instead
 4top check h_<key> --json                 # would a resume work here, and why not
 4top new codex -- --model MODEL           # native arguments after --
 4top resume h_<key> --yes                 # restore this process as the agent

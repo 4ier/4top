@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- The preview opens at the latest messages and pages back with Earlier (`e`); a
+  transcript's opening is mostly injected context. `4top preview KEY --tail` is the
+  command-line form, and a remote host without it falls back to the first page.
+- Sessions an agent started for itself are hidden until `a`. Rows carry
+  `subagent`, filled by session-ls once it reports it.
 - The panel lists this machine and every configured host at once, one section each,
   with its own page (`[` / `]`), refresh interval and state (`cached`,
   `unreachable`, `partial`). `H` and host switching are gone; `--host` still scopes

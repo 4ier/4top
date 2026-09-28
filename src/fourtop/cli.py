@@ -65,6 +65,10 @@ def parser() -> argparse.ArgumentParser:
         if command == "preview":
             sub.add_argument("key", help="Stable key; never a row number")
             sub.add_argument("--cursor", type=int, default=0, help="Byte offset returned by a previous page")
+            sub.add_argument("--tail", action="store_true",
+                             help="The latest messages instead of the first page")
+            sub.add_argument("--before", type=int, default=None,
+                             help="With --tail: the earlier_cursor returned by a later page")
             sub.add_argument("--json", action="store_true")
         if command == "new":
             sub.add_argument("agent", choices=("codex", "claude", "pi"))
@@ -192,6 +196,15 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
             return _display(snapshot, args.json, args.agent, args.project)
         if command == "preview":
             row = manager.resolve_row(args.key)
+            if args.tail:
+                title, body, earlier = manager.preview_tail(row, args.before)
+                if args.json:
+                    print(json.dumps({"key": row.key, "host": row.host, "label": title,
+                                      "body": body, "earlier_cursor": earlier}, ensure_ascii=False))
+                else:
+                    print(clean_text(title, multiline=True))
+                    print(clean_text(body, multiline=True))
+                return 0
             title, body, cursor = manager.preview(row, max(0, args.cursor))
             if args.json:
                 print(json.dumps({"key": row.key, "host": row.host, "label": title,
