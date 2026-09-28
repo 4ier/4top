@@ -56,7 +56,10 @@ def unique(items, query: str, keys):
 def row_for(record: HistoryRecord, host: str = "local") -> Session:
     return Session(record.key, record.agent, record.cwd, record.title, record.started, record.last,
                    host, record.file, record.status, tuple(record.problems), record.can_resume,
-                   None, record, bool(getattr(record, "subagent", False)))
+                   None, record, bool(getattr(record, "subagent", False)),
+                   str(getattr(record, "activity", "") or ""),
+                   str(getattr(record, "last_request", "") or ""),
+                   str(getattr(record, "branch", "") or ""))
 
 
 def slice_rows(rows: list[Session], query: str = "", agent=None, project=None) -> list[Session]:
@@ -301,7 +304,7 @@ class DemoManager:
         now = utc_now()
         from datetime import datetime, timedelta, timezone
         rows = [
-            ("demo_1", "codex", "/demo/api-service", "fix retry handling", 24),
+            ("demo_1", "codex", "/demo/api-service", "fix retry handling", 1),
             ("demo_2", "claude", "/demo/web-client", "改善中文搜索体验", 11),
             ("demo_3", "pi", "/demo/infra-tools", "inspect migration", 5),
             ("demo_4", "claude", "/demo/api-service", "investigate timeout", 125),
@@ -314,6 +317,14 @@ class DemoManager:
             for key, agent, cwd, title, minutes in rows
             for started in [(datetime.now(timezone.utc) - timedelta(minutes=minutes)).isoformat()]
         ]
+        # A working session, one waiting for its person, and one that stopped mid-turn.
+        from dataclasses import replace
+        states = {"demo_1": ("working", "now add jitter to the backoff", "fix/retry-jitter"),
+                  "demo_2": ("waiting", "", "feat/cjk-search"),
+                  "demo_4": ("working", "check the p99 after the pool change", "")}
+        self.rows = [replace(row, activity=states[row.key][0], last_request=states[row.key][1],
+                             branch=states[row.key][2]) if row.key in states else row
+                     for row in self.rows]
         self._now = now
 
     @property

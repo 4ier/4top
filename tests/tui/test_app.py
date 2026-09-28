@@ -538,9 +538,31 @@ async def test_a_session_written_a_moment_ago_is_marked_active():
     from datetime import datetime, timezone
 
     manager = DemoManager()
-    manager.rows[0] = replace(manager.rows[0], last=datetime.now(timezone.utc).isoformat())
+    manager.rows[2] = replace(manager.rows[2], last=datetime.now(timezone.utc).isoformat())
     app = FourtopApp(manager)
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
-        assert "active now" in app.query_one(OptionList).get_option("demo:demo_1").prompt.plain
+        assert "active now" in app.query_one(OptionList).get_option("demo:demo_3").prompt.plain
         await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_rows_say_what_each_session_is_doing_and_was_last_asked():
+    from datetime import datetime, timedelta, timezone
+
+    from fourtop.app import state
+
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        text = {key: app.query_one(OptionList).get_option(f"demo:{key}").prompt.plain
+                for key in ("demo_1", "demo_2", "demo_4", "demo_5")}
+        assert "⟳ working" in text["demo_1"] and "fix/retry-jitter" in text["demo_1"]
+        assert "› now add jitter to the backoff" in text["demo_1"], "the latest request, not the first"
+        assert "▶ your turn" in text["demo_2"]
+        assert "✗ stopped" in text["demo_4"], "working, but silent for two hours"
+        assert "working" not in text["demo_5"] and "›" not in text["demo_5"]
+        await pilot.press("q")
+    old = DemoManager().rows[0]
+    old = replace(old, last=(datetime.now(timezone.utc) - timedelta(days=3)).isoformat())
+    assert state(old) == "", "a days-old session is history, not a task in flight"

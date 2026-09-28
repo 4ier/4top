@@ -66,13 +66,19 @@ class Session:
     # A session another agent session started for itself, such as Codex's approval
     # reviewer or a spawned worker. Hidden by default: nobody resumes those by hand.
     subagent: bool = False
+    # From the transcript's end (session-ls): "working" mid-turn, "waiting" once the
+    # turn is handed back; the person's latest request; the git branch.
+    activity: str = ""
+    last_request: str = ""
+    branch: str = ""
 
     def json(self) -> dict[str, Any]:
         result = asdict(self)
         result.pop("record")
         result["problems"] = list(self.problems)
-        if len(self.title) > TITLE_LIMIT:
-            result["title"] = self.title[:TITLE_LIMIT - 1] + "…"
+        for name in ("title", "last_request"):
+            if len(result[name]) > TITLE_LIMIT:
+                result[name] = result[name][:TITLE_LIMIT - 1] + "…"
         result["schema_version"] = ROW_SCHEMA
         return result
 
