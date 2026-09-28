@@ -14,10 +14,15 @@ port=$1 lan=$2 remote=$3
 # If the tailnet path fails before a connection is made (the host or the jump host is
 # off), fall back to the LAN address: at home a sleeping jump host must not hide the
 # machine behind it. Nothing has been sent at that point, so the retry is invisible.
+#
+# The timeout guards only the attempt. netcat's -w is also an *idle* timeout: on the
+# connection itself it closed every session that sat quiet for five seconds, so
+# reachability is probed with -z -w and the connection is made without it.
 if nc -z "${socks%:*}" "${socks##*:}" 2>/dev/null; then
     case $remote in
-        via:*) ssh -o ConnectTimeout=5 -W "$lan:$port" "${remote#via:}" 2>/dev/null ;;
-        *) nc -w 5 -X 5 -x "$socks" "$remote" "$port" ;;
-    esac && exit 0
+        via:*) ssh -o ConnectTimeout=5 -W "$lan:$port" "${remote#via:}" 2>/dev/null && exit 0 ;;
+        *) nc -z -w 5 -X 5 -x "$socks" "$remote" "$port" 2>/dev/null &&
+               exec nc -X 5 -x "$socks" "$remote" "$port" ;;
+    esac
 fi
-exec nc -w 5 "$lan" "$port"
+exec nc "$lan" "$port"
