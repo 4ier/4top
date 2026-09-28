@@ -142,7 +142,7 @@ ssh = "me@build-box"                 # 任意 ssh 目标，包括 tailnet 名称
 
 本地状态保持私有：`$XDG_STATE_HOME/4top` 里只有本机身份和上次选中项，
 `$XDG_CACHE_HOME/4top` 是可重建的元数据缓存。不保留环境变量值、prompt 文本或转录内容。
-唯一的网络访问就是你配置的 ssh。标题和路径本身可能敏感，录屏前仍需检查。
+网络访问只有你配置的 ssh，以及每天一次的 PyPI 更新检查（`[ui] update_check = false` 可关闭）。标题和路径本身可能敏感，录屏前仍需检查。
 
 [完整操作与退出码](docs/troubleshooting.md) · [隐私](docs/privacy.md) ·
 [贡献](CONTRIBUTING.md) · [兼容性](docs/compatibility.md)

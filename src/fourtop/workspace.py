@@ -61,9 +61,23 @@ def tmux_binary(env: dict[str, str]) -> str | None:
     return shutil.which("tmux", path=env.get("PATH", os.defpath))
 
 
+def _has_terminfo(name: str) -> bool:
+    try:
+        return subprocess.run(["infocmp", name], capture_output=True).returncode == 0
+    except OSError:
+        pass
+    # No infocmp (Termux ships the entries without it): look where ncurses looks.
+    # Directories are named by first letter, or by its hex code on macOS.
+    roots = [os.environ.get("TERMINFO"), str(Path.home() / ".terminfo"),
+             os.path.join(os.environ.get("PREFIX", "/usr"), "share/terminfo"),
+             "/usr/share/terminfo", "/usr/lib/terminfo", "/lib/terminfo", "/etc/terminfo"]
+    return any(root and (Path(root, name[0], name).is_file()
+                         or Path(root, f"{ord(name[0]):x}", name).is_file()) for root in roots)
+
+
 def terminal() -> str:
     for name in ("tmux-256color", "screen-256color"):
-        if subprocess.run(["infocmp", name], capture_output=True).returncode == 0:
+        if _has_terminfo(name):
             return name
     return "screen"
 

@@ -395,6 +395,7 @@ class FourtopApp(App[tuple | None]):
         self._placed: str | None = None
         self.project_filter: str | None = None
         self.show_subagents = False
+        self.update_notice = None
         self.opened: dict[str, object] = {}  # tag -> tmux pane, as tmux reports it
         self.busy: dict[str, str] = {}  # tag -> what is happening to it right now
         self._signature = None
@@ -447,7 +448,16 @@ class FourtopApp(App[tuple | None]):
         if local is not None:
             self.set_interval(self.manager.config.history_refresh_seconds, self.refresh_history)
             self.run_worker(self.refresh_history())
+        if not self.manager.demo and getattr(self.manager.config, "update_check", False):
+            self.run_worker(self._check_update())
         await self.refresh_rows()
+
+    async def _check_update(self):
+        from .update import check
+        self.update_notice = await asyncio.to_thread(check, self.manager.config.cache_dir)
+        if self.update_notice:
+            self._signature = None
+            self.render_list()
 
     def on_resize(self, event):
         if self.is_mounted:
@@ -680,6 +690,8 @@ class FourtopApp(App[tuple | None]):
             top.append("  searching…", style="dim italic")
         elif any(s.refreshing and not s.loaded for s in self.sources):
             top.append("  ⟳", style="dim")
+        if self.update_notice:
+            top.append("  ↑ " + self.update_notice.text(), style="bold magenta")
         top.truncate(width, overflow="ellipsis")
         self.query_one("#top", Static).update(top)
         keys = ["⏎ open", "/ search", "p project", "space preview", "[ ] page", "n new"]

@@ -1,7 +1,9 @@
 # Privacy and local security
 
-4top has no account, telemetry endpoint, automatic update check, model API call,
-transcript upload or crash-report upload. Pure browsing/searching stays local.
+4top has no account, telemetry endpoint, model API call, transcript upload or
+crash-report upload. The panel asks PyPI's index at most once a day whether a newer
+4top exists; the request carries only the project name, and
+`[ui] update_check = false` turns it off. Pure browsing/searching stays local.
 Agent `--help`/`--version` probes are invoked for diagnostics and runtime planning;
 the original CLI's own behavior and settings still apply.
 

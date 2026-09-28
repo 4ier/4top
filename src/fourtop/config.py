@@ -90,6 +90,7 @@ class Config:
     agent_args: dict[str, tuple[str, ...]] = field(default_factory=dict)
     layout: str = "auto"  # auto | tmux | plain
     rows_per_host: int = 0  # 0: fit the panel's height
+    update_check: bool = True  # one daily request to PyPI's index; see fourtop.update
 
     def root(self, agent: str) -> Root:
         return next(root for root in self.roots if root.agent == agent)
@@ -134,7 +135,7 @@ class Config:
         ui, history, agents, hosts = (data.get(name, {}) for name in ("ui", "history", "agents", "hosts"))
         for section, values, permitted in (
             ("ui", ui, {"refresh_seconds", "history_refresh_seconds", "color", "layout",
-                        "rows_per_host"}),
+                        "rows_per_host", "update_check"}),
             ("history", history, {"metadata_max_bytes", "metadata_max_lines", "preview_max_lines"}),
         ):
             if set(values) - permitted:
@@ -168,6 +169,9 @@ class Config:
         color = ui.get("color", "auto")
         if color not in ("auto", "none"):
             raise FourtopError("ui.color must be auto or none", 2)
+        update_check = ui.get("update_check", True)
+        if not isinstance(update_check, bool):
+            raise FourtopError("ui.update_check must be true or false", 2)
         layout = ui.get("layout", "auto")
         if layout not in ("auto", "tmux", "plain"):
             raise FourtopError("ui.layout must be auto, tmux or plain", 2)
@@ -178,4 +182,4 @@ class Config:
                    _number(history, "metadata_max_lines", 2000, 1, True),
                    _number(history, "preview_max_lines", 200, 1, True), color, str(config_file),
                    {name: _host(name, options) for name, options in hosts.items()},
-                   agent_args, layout, _number(ui, "rows_per_host", 0, 0, True))
+                   agent_args, layout, _number(ui, "rows_per_host", 0, 0, True), update_check)
