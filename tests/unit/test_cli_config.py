@@ -266,3 +266,9 @@ def test_check_reports_why_an_installed_cli_cannot_run(lab, tmp_path):
 def test_layout_and_agent_arguments_are_validated(lab, text):
     with pytest.raises(FourtopError):
         lab.write_config(text)
+
+
+def test_update_check_is_a_boolean(lab):
+    assert lab.write_config("[ui]\nupdate_check = false\n").update_check is False
+    with pytest.raises(FourtopError):
+        lab.write_config('[ui]\nupdate_check = "no"\n')

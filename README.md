@@ -199,6 +199,7 @@ history_refresh_seconds = 5.0
 color = "auto"                         # or "none"; NO_COLOR is also supported
 layout = "auto"                        # "tmux" (require it), "plain", or auto
 rows_per_host = 0                      # sessions per machine page; 0 fits the screen
+update_check = true                    # daily PyPI check; shows how to upgrade
 
 [history]
 metadata_max_bytes = 2097152
@@ -224,7 +225,7 @@ Agent store roots respect `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and
 launch profile must agree. Local state is private: `$XDG_STATE_HOME/4top` holds a
 local identity and your last selection, and `$XDG_CACHE_HOME/4top` holds
 rebuildable metadata. No environment values, prompt text, or transcripts are
-retained. The only network access is the ssh you configured.
+retained. Network access is the ssh you configured, plus the daily update check.
 
 [Privacy](docs/privacy.md) · [Troubleshooting](docs/troubleshooting.md) · [Design](docs/design.md)
 

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- The panel says when a newer 4top is on PyPI, with the upgrade command for how this
+  copy was installed (uv tool, pipx, pip, or a checkout). It asks at most once a day
+  and never reports a failed check; `[ui] update_check = false` turns it off.
+- The tmux layout no longer requires `infocmp`, which Termux does not ship: 0.2.0a5
+  crashed there when the panel started. The terminfo directories are read instead.
+
 ## 4top 0.2.0a5 — 2026-09-28
 
 - The preview opens at the latest messages and pages back with Earlier (`e`); a
