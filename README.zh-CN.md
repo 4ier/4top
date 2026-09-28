@@ -5,7 +5,7 @@
 找到你的工作，恢复精确的原生会话，用 SSH 触达其他机器。一个基于
 **session-ls** 的键盘优先终端面板；没有 4top 常驻服务、不调用模型、不上传遥测。
 
-[English](README.md) · [兼容记录](docs/compatibility.md) · [远程主机](docs/remote-design.md) · [验收](docs/validation/README.md)
+[English](README.md) · [兼容记录](docs/compatibility.md) · [远程主机](docs/remote-design.md) · [手机/平板](docs/mobile.md) · [验收](docs/validation/README.md)
 
 ![4top 合成演示，未读取用户历史](docs/demo/demo.svg)
 

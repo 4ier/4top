@@ -1,0 +1,20 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# ssh ProxyCommand for machines at home.
+#
+#   ProxyCommand ~/.ssh/route %p LAN_ADDRESS TAILNET_ADDRESS
+#   ProxyCommand ~/.ssh/route %p LAN_ADDRESS via:JUMP_ALIAS    (not on the tailnet)
+#
+# Prefer tailscaled whenever it runs: at home it finds the LAN path by itself, away it
+# finds a direct path, so nothing has to guess where this device is. (A guess from a
+# 192.168.0.x address misfires on every other network that uses the same range.)
+# Checking the local SOCKS port is instant. Without tailscaled, use the LAN address,
+# so home use never depends on it.
+socks=${TAILSCALE_SOCKS:-127.0.0.1:1055}
+port=$1 lan=$2 remote=$3
+if nc -z "${socks%:*}" "${socks##*:}" 2>/dev/null; then
+    case $remote in
+        via:*) exec ssh -W "$lan:$port" "${remote#via:}" ;;
+        *) exec nc -X 5 -x "$socks" "$remote" "$port" ;;
+    esac
+fi
+exec nc "$lan" "$port"

@@ -1,0 +1,4 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# The tailscale CLI: tailscaled built with ts_include_cli acts as the CLI when
+# invoked under that name. Installed as $PREFIX/bin/tailscale.
+exec -a tailscale tailscaled --socket="$HOME/.local/state/tailscale/tailscaled.sock" "$@"
