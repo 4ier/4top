@@ -25,6 +25,7 @@ SOCKET = "4top"  # FOURTOP_TMUX_SOCKET overrides it, so tests never meet a real 
 SESSION = "4top"
 MARKER = "FOURTOP_WORKSPACE"
 KEY = "@fourtop-key"
+PANEL = "@fourtop-panel"
 STAGE = "@fourtop-stage"
 # Below this width two panes are too cramped: the focused one is shown alone.
 NARROW = 100
@@ -100,8 +101,33 @@ def enter(config, args: list[str]) -> None:
     conf.write_text(CONF.format(terminal=terminal(), narrow=NARROW), encoding="utf-8")
     env.pop("TMUX", None)  # started from inside another tmux: nest, on a separate server
     panel = ["env", f"{MARKER}=1", sys.executable, "-m", "fourtop", *args]
+    revive(tmux, socket(env), panel, env)
     os.execvpe(tmux, [tmux, "-L", socket(env), "-f", str(conf), "new-session", "-A", "-s", SESSION,
                       "-n", "4top", "--", *panel], env)
+
+
+def revive(tmux: str, name: str, panel: list[str], env: dict[str, str]) -> None:
+    """Bring the list back into a layout that outlived it.
+
+    Agents keep running after the panel exits (an upgrade, a crash), and attaching
+    again would show them without the list. The panel's pane is kept when it exits,
+    so it is started again in place; a layout whose panel pane is gone entirely
+    gets a new window with a panel of its own.
+    """
+    def run(*args):
+        return subprocess.run([tmux, "-L", name, *args], capture_output=True, text=True, env=env)
+    listed = run("list-panes", "-s", "-t", SESSION, "-F", f"#{{pane_id}}\t#{{{PANEL}}}\t#{{pane_dead}}")
+    if listed.returncode != 0:
+        return  # no layout yet: new-session starts one
+    panes = [line.split("\t") for line in listed.stdout.splitlines()]
+    mine = [pane for pane in panes if len(pane) == 3 and pane[1] == "1"]
+    if any(dead == "0" for _, _, dead in mine):
+        return
+    if mine:
+        run("respawn-pane", "-k", "-t", mine[0][0], "--", *panel)
+        run("select-window", "-t", mine[0][0])
+    else:
+        run("new-window", "-t", f"{SESSION}:", "-n", "4top", "--", *panel)
 
 
 @dataclass(frozen=True)
@@ -148,6 +174,9 @@ class Workspace:
         return pane
 
     def ensure_layout(self, width: int) -> None:
+        # Mark the list's pane and keep it when it exits, so `4top` can revive it.
+        self.run("set-option", "-p", "-t", self.panel, PANEL, "1")
+        self.run("set-option", "-p", "-t", self.panel, "remain-on-exit", "on")
         self.stage()
         self.fit(width)
         if width < NARROW:
@@ -156,7 +185,7 @@ class Workspace:
     def fit(self, width: int) -> None:
         """Give the list a readable width and the agent the rest."""
         if width >= NARROW:
-            self.run("resize-pane", "-t", self.panel, "-x", str(max(36, min(56, width * 3 // 10))))
+            self.run("resize-pane", "-t", self.panel, "-x", str(max(40, min(60, width * 2 // 5))))
 
     def panes(self) -> dict[str, Pane]:
         out = self.run("list-panes", "-a", "-F",
@@ -213,9 +242,19 @@ class Workspace:
         self.show(pane)
         return pane
 
-    def reap(self) -> list[Pane]:
+    def poll(self) -> tuple[dict[str, Pane], list[Pane]]:
+        """What is open, after closing what has exited: one tmux call when nothing
+        has exited, which is nearly always."""
+        panes = self.panes()
+        dead = [pane for pane in panes.values() if pane.dead]
+        if dead:
+            self.reap(dead)
+        return {key: pane for key, pane in panes.items() if not pane.dead}, dead
+
+    def reap(self, dead: list[Pane] | None = None) -> list[Pane]:
         """Close panes whose agent has exited; return them so the panel can say so."""
-        dead = [pane for pane in self.panes().values() if pane.dead]
+        if dead is None:
+            dead = [pane for pane in self.panes().values() if pane.dead]
         if not dead:
             return []
         stage = self.stage()

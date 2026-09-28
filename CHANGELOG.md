@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+Found by driving the panel on an Android tablet (Termux, 113×54, over the tailnet).
+
+- Idle CPU fell from 8% to about 3% of one core (the bare framework is about 1.5%):
+  the list is compared on plain values and rebuilt only when it changed, a host
+  between its refreshes is not asked or repainted, local rows are rebuilt only
+  after a new scan, and tmux is polled once every two seconds with one call. While
+  the agent has the keyboard, remote hosts refresh every minute and catch up on
+  return. A host that cannot be reached is retried on its interval, not every tick.
+- A tap selects a row and a tap on the selected row opens it. Opening on the first
+  touch started sessions nobody meant to open.
+- When the agent beside the list has the keyboard, the list dims its selection and
+  says so, because typing meant for the list went to the agent.
+- A session written in the last minute says "active now": it is probably open
+  elsewhere, where a second copy may be read-only. Ages under a minute read "now",
+  and ages now advance instead of freezing at the moment the list was built.
+- Rows no longer wrap for a few seconds after the layout splits; machine headers are
+  no longer dimmed; the list takes about two fifths of a wide screen.
+- An agent on another host no longer dies with the panel: it used the panel's ssh
+  master, which closing the panel's pane hung up. Each agent has its own connection.
+- Running `4top` again brings the list back into a layout whose list had exited
+  (an upgrade, a crash), without touching the agents that kept running.
+
 ## 4top 0.2.0a6 — 2026-09-28
 
 - The panel says when a newer 4top is on PyPI, with the upgrade command for how this

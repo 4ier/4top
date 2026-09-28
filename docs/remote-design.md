@@ -99,8 +99,10 @@ is the recorded directory still there, and is that agent installed on that host.
 
 The interactive connection carries `ServerAliveInterval`/`ServerAliveCountMax` and
 `TCPKeepAlive`, so a dead link becomes an error in about 45 seconds instead of a
-hang, and it reuses the warm `ControlMaster` connection so the hand-over does not
-pay a fresh handshake. If the link does drop, the remote process may be gone but the
+hang. It deliberately does not reuse the panel's `ControlMaster`: the master is the
+panel's child, and an agent multiplexed over it died when the panel exited (found
+on a tablet, where restarting the panel dropped two remote agents). An agent's own
+connection costs one handshake and outlives the panel. If the link does drop, the remote process may be gone but the
 transcript is not: the panel says so and the session can be resumed again. Keeping an
 agent alive across a drop is the remote machine's own multiplexer, not 4top's.
 

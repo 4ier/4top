@@ -387,3 +387,25 @@ def test_a_subagent_flag_survives_the_wire(remote):
     rows = parse_rows(host, payload(subagent=True) + payload(key="h_def"))
     assert [row.subagent for row in rows] == [True, False]
     assert rows[0].json()["subagent"] is True
+
+
+def test_an_unreachable_host_is_retried_on_its_interval_not_every_tick(remote):
+    from fourtop.services import Manager
+
+    load, _ = remote
+    config, host = load(mode="fail")
+    manager = Manager(config, host)
+    assert manager.due()
+    with pytest.raises(Unavailable):
+        manager.snapshot(False)
+    assert not manager.due(), "a failure waits for the next interval"
+    manager.close()
+
+
+def test_an_agent_connection_does_not_ride_on_the_panels_master(lab):
+    # The master belongs to the panel; an agent multiplexed over it died with it.
+    host = lab.config.resolve_host("me@venus")
+    agent = ssh_argv(lab.config, host, ["resume", "h_x", "--yes"], tty=True)
+    assert "ControlPath=none" in agent and "ControlMaster=no" in agent and "-t" in agent
+    query = ssh_argv(lab.config, host, ["list", "--json"])
+    assert any(value.startswith("ControlPath=") and value != "ControlPath=none" for value in query)

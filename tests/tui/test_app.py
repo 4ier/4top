@@ -476,3 +476,68 @@ async def test_sessions_agents_started_for_themselves_are_hidden_until_asked():
         assert manager.rows[1].key in {row.key for row in app.shown}
         assert "with subagents" in str(app.query_one("#top", Static).render())
         await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_tap_selects_and_a_second_tap_opens(tmp_path):
+    # On a phone a tap is how you select; opening on the first touch started
+    # sessions nobody meant to open.
+    from textual.events import Click
+
+    opened = []
+
+    class Recording(LocalDemo):
+        def resume(self, query, cwd=None):
+            opened.append(query)
+            return LaunchPlan("pi", "/fake/pi", ("/fake/pi",), str(tmp_path), {})
+
+    manager = Recording()
+    manager.rows = [replace(row, cwd=str(tmp_path)) for row in manager.rows]
+    app = FourtopApp(manager, workspace=FakeWorkspace())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        listing = app.query_one(SessionList)
+        target = listing.highlighted + 1
+        tap = SimpleNamespace(style=SimpleNamespace(meta={"option": target}))
+        await listing._on_click(tap)
+        await pilot.pause(.2)
+        assert listing.highlighted == target and opened == []
+        await listing._on_click(tap)
+        await pilot.pause(.4)
+        assert opened == [app._ids[target].split(":", 1)[1]]
+        assert Click  # the real event carries the option in style.meta, as faked here
+        await pilot.press("Q")
+        await pilot.pause()
+        if isinstance(app.screen, Confirm):
+            app.screen.query_one("#confirm").press()
+
+
+@pytest.mark.asyncio
+async def test_the_list_says_when_the_agent_has_the_keyboard():
+    from textual.events import AppBlur, AppFocus
+
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        app.post_message(AppBlur())
+        await pilot.pause()
+        assert app.screen.has_class("-away")
+        assert "typing goes to the agent" in str(app.query_one("#keys", Static).render())
+        app.post_message(AppFocus())
+        await pilot.pause()
+        assert not app.screen.has_class("-away")
+        assert "open" in str(app.query_one("#keys", Static).render())
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_session_written_a_moment_ago_is_marked_active():
+    from datetime import datetime, timezone
+
+    manager = DemoManager()
+    manager.rows[0] = replace(manager.rows[0], last=datetime.now(timezone.utc).isoformat())
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        assert "active now" in app.query_one(OptionList).get_option("demo:demo_1").prompt.plain
+        await pilot.press("q")
