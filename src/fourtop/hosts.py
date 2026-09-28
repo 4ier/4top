@@ -132,7 +132,10 @@ def row_from(host: Host, payload: dict, number: int = 0) -> Session:
             problems=tuple(str(value) for value in payload.get("problems", ())),
             can_resume=bool(payload.get("can_resume", False)),
             issue=payload.get("issue") if isinstance(payload.get("issue"), str) else None,
-            subagent=payload.get("subagent") is True)
+            subagent=payload.get("subagent") is True,
+            activity=str(payload.get("activity") or ""),
+            last_request=str(payload.get("last_request") or ""),
+            branch=str(payload.get("branch") or ""))
     except (KeyError, TypeError, ValueError):
         raise Unavailable(f"{host.name}: row {number} is missing required fields") from None
 

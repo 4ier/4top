@@ -15,6 +15,7 @@ import subprocess
 import threading
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from rich.text import Text
@@ -48,6 +49,27 @@ def when(last: str) -> str:
     session does not repaint the list every second."""
     label = age(last)
     return "now" if label.endswith("s") and label[:-1].isdigit() else label
+
+
+STALE_WORKING = 600  # a turn with no write for this long has stopped, not paused
+RECENT = 86400  # older sessions are history: no state is worth a badge
+STATE_STYLE = {"⟳ working": "bold cyan", "▶ your turn": "bold magenta",
+               "✗ stopped": "bold red", "active now": "bold yellow"}
+
+
+def state(row: Session) -> str:
+    """What the session is doing, as far as its transcript says."""
+    try:
+        seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(row.last)).total_seconds()
+    except (TypeError, ValueError):
+        return ""
+    if seconds > RECENT:
+        return ""
+    if row.activity == "working":
+        return "⟳ working" if seconds < STALE_WORKING else "✗ stopped"
+    if row.activity == "waiting":
+        return "▶ your turn"
+    return "active now" if seconds < 60 else ""
 
 
 def first_line(title: str) -> str:
@@ -625,7 +647,11 @@ class FourtopApp(App[tuple | None]):
             return {index: configured for index in visible}
         height = self.query_one("#list", OptionList).size.height or (self.size.height - 3)
         expanded = [i for i, s in enumerate(self.sources) if not s.collapsed]
-        left = max(2, (height - len(self.sources)) // 2)
+        # Rows are two lines, or three with a latest request; budget by the average.
+        sample = [row for i in expanded for row in visible[i][:40]]
+        lines = sum(3 if first_line(r.last_request)[:40] not in ("", first_line(r.title)[:40])
+                    else 2 for r in sample) / len(sample) if sample else 2
+        left = max(2, int((height - len(self.sources)) / lines))
         sizes = {}
         pending = sorted(expanded, key=lambda i: len(visible[i]))
         while pending:
@@ -681,7 +707,7 @@ class FourtopApp(App[tuple | None]):
         signature = (width, tuple(
             (kind, key, value.plain) if kind == "h" else (kind, key, value) if kind == "e" else
             (kind, key, value.title, when(value.last), value.cwd, value.agent, value.can_resume,
-             key in self.opened, self.busy.get(key))
+             key in self.opened, self.busy.get(key), state(value), value.last_request, value.branch)
             for kind, key, value in layout))
         if signature != self._signature:
             self._signature = signature
@@ -737,25 +763,34 @@ class FourtopApp(App[tuple | None]):
         head.append("● " if opened else "  ", style="bold green")
         head.append(title or "(untitled)", style="bold" if opened else "" if title else "dim italic")
         head.truncate(width, overflow="ellipsis")
-        busy = self.busy.get(tag)
         foot = Text("    ")
+        busy = self.busy.get(tag)
         if busy:
             foot.append(busy + " · ", style="bold yellow")
+        label = state(row)
+        if label:
+            foot.append(label, style=STATE_STYLE[label])
+            foot.append(" · ", style="dim")
         recent = when(row.last)
-        tail = ("active now" if recent == "now" else recent) + (" · read-only" if not row.can_resume else "")
-        # The time is what matters most; a long project name gives way to it.
+        tail = ("" if label == "active now" else recent) + (" · read-only" if not row.can_resume else "")
+        # What must survive a narrow screen: the state and the time. The project and
+        # then the branch give way to them.
+        branch = row.branch if row.branch not in ("", "main", "master") else ""
         room = width - foot.cell_len - len(row.agent) - len(tail) - 6
-        name = Text(project(row.cwd))
+        name = Text(project(row.cwd) + (f" · {branch}" if branch else ""))
         name.truncate(max(4, room), overflow="ellipsis")
-        foot.append(f"{row.agent} · {name.plain} · ", style="dim")
-        # Written in the last minute: probably open elsewhere (another terminal, a
-        # desktop app), where a second copy may be read-only or collide with it.
-        foot.append("active now" if recent == "now" else recent,
-                    style="bold yellow" if recent == "now" else "dim")
-        if not row.can_resume:
-            foot.append(" · read-only", style="dim")
+        foot.append(f"{row.agent} · {name.plain}" + (" · " if tail else ""), style="dim")
+        foot.append(tail, style="dim")
         foot.truncate(width, overflow="ellipsis")
-        return Text("\n").join([head, foot])
+        lines = [head, foot]
+        request = first_line(row.last_request)
+        if request and request[:40] != title[:40]:
+            # The latest request says what the session is doing now; the title only
+            # says how it began, which a day later is rarely enough.
+            last = Text("    › " + request, style="dim italic")
+            last.truncate(width, overflow="ellipsis")
+            lines.append(last)
+        return Text("\n").join(lines)
 
     def _render_chrome(self, width: int):
         filters = []

@@ -92,6 +92,12 @@ the list returns when it exits.
 | `n`, `r`, `?` | New agent on the selected machine, refresh, help |
 | `q`, `Q`, `Ctrl-C` | Detach (tmux) or quit; close all agents and quit |
 
+Each row says what the session is doing, from the end of its transcript: `⟳ working`
+while the agent is mid-turn, `▶ your turn` once it has handed the turn back, and
+`✗ stopped` for a turn that went silent for ten minutes. A third line, `› …`, is
+your latest request when it differs from how the session began, and the git branch
+joins the project. Badges are shown for the last day only; older sessions are history.
+
 Sessions an agent started for itself (Codex's approval reviewer, spawned workers)
 are hidden until you press `a`. The preview opens at the latest messages, where the
 conversation is, rather than at the injected context a transcript begins with.

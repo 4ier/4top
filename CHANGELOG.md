@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Rows say what each session is doing: `⟳ working`, `▶ your turn`, or `✗ stopped`
+  (mid-turn but silent for ten minutes), for sessions active in the last day. A
+  third line shows the latest request when it differs from the first, and the git
+  branch joins the project. Read from the transcript's end by session-ls; with an
+  older session-ls the rows look as before. No model is called.
 - One tap on a touch screen still opened a session: Textual runs OptionList's own
   click handler after an override unless the default is prevented. It is now, and a
   touch that Termux reports twice within 120 ms counts once. Found on the tablet;
