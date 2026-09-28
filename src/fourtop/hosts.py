@@ -16,6 +16,7 @@ from session_ls.storage import StorageError, private_dir
 from .config import Config, Host
 from .errors import Unavailable
 from .models import ROW_SCHEMA, Session, Snapshot
+from .sync import SYNC_VERSION, SyncState, digest, fingerprint
 
 # BatchMode never prompts, and the ServerAlive pair turns a dead link into an error in
 # about 45 seconds instead of a hang. Rows are repetitive JSON fetched on every refresh,
@@ -90,8 +91,9 @@ def ssh_failure(host: Host, code: int, stderr: str) -> Unavailable:
     return Unavailable(f"{host.name}: ssh exit {code}" + (f" · {detail}" if detail else ""))
 
 
-def parse_rows(host: Host, stdout: str) -> list[Session]:
-    rows = []
+def parse_payloads(host: Host, stdout: str) -> tuple[list[dict], dict | None]:
+    """Validated row objects, and the sync trailer if the host sent one."""
+    payloads, summary = [], None
     for number, line in enumerate(stdout.splitlines(), 1):
         if not line.strip():
             continue
@@ -105,17 +107,40 @@ def parse_rows(host: Host, stdout: str) -> list[Session]:
         if version != ROW_SCHEMA:
             raise Unavailable(f"{host.name} speaks row schema {version!r}; this build speaks "
                               f"{ROW_SCHEMA}. Update both sides before trusting this view.")
-        try:
-            rows.append(Session(
-                key=str(payload["key"]), agent=str(payload["agent"]), cwd=str(payload["cwd"]),
-                title=str(payload["title"]), started=str(payload["started"]), last=str(payload["last"]),
-                host=host.name, source=str(payload.get("source", "")),
-                status=str(payload.get("status", "available")),
-                problems=tuple(str(value) for value in payload.get("problems", ())),
-                can_resume=bool(payload.get("can_resume", False)),
-                issue=payload.get("issue") if isinstance(payload.get("issue"), str) else None))
-        except (KeyError, TypeError, ValueError):
-            raise Unavailable(f"{host.name}: row {number} is missing required fields") from None
+        if "sync" in payload:
+            summary = payload["sync"]
+            if (not isinstance(summary, dict) or summary.get("version") != SYNC_VERSION
+                    or not isinstance(summary.get("count"), int)
+                    or not isinstance(summary.get("digest"), str)):
+                raise Unavailable(f"{host.name}: unreadable sync summary; nothing was trusted")
+            continue
+        row_from(host, payload, number)  # validate now; a bad row poisons the whole answer
+        payloads.append(payload)
+    return payloads, summary
+
+
+def row_from(host: Host, payload: dict, number: int = 0) -> Session:
+    try:
+        return Session(
+            key=str(payload["key"]), agent=str(payload["agent"]), cwd=str(payload["cwd"]),
+            title=str(payload["title"]), started=str(payload["started"]), last=str(payload["last"]),
+            host=host.name, source=str(payload.get("source", "")),
+            status=str(payload.get("status", "available")),
+            problems=tuple(str(value) for value in payload.get("problems", ())),
+            can_resume=bool(payload.get("can_resume", False)),
+            issue=payload.get("issue") if isinstance(payload.get("issue"), str) else None)
+    except (KeyError, TypeError, ValueError):
+        raise Unavailable(f"{host.name}: row {number} is missing required fields") from None
+
+
+def parse_rows(host: Host, stdout: str) -> list[Session]:
+    payloads, _ = parse_payloads(host, stdout)
+    return [row_from(host, payload) for payload in payloads]
+
+
+def rows_of(host: Host, payloads) -> list[Session]:
+    rows = [row_from(host, payload) for payload in payloads]
+    rows.sort(key=lambda row: row.last, reverse=True)
     return rows
 
 
@@ -146,9 +171,50 @@ def _collect(config: Config, host: Host, args: list[str]) -> tuple[list[Session]
     return parse_rows(host, out), _issues(host, err, code)
 
 
-def remote_snapshot(config: Config, host: Host) -> Snapshot:
-    rows, issues = _collect(config, host, ["list", "--json"])
-    return Snapshot(rows, issues, scope=host.name)
+def remote_snapshot(config: Config, host: Host, sync: SyncState | None = None) -> Snapshot:
+    """The host's rows. With a sync state, only what changed since the last call
+    travels, and the merged result is proven equal to the host's by digest."""
+    if sync is None:
+        rows, issues = _collect(config, host, ["list", "--json"])
+        return Snapshot(rows, issues, scope=host.name)
+    if sync.supported is False:
+        code, out, err = run_remote(config, host, ["list", "--json"])
+        if code not in (0, 6):
+            raise ssh_failure(host, code, err)
+        return _plain(host, sync, parse_payloads(host, out)[0], err, code)
+    for attempt in ("incremental", "full"):
+        if attempt == "full":
+            sync.reset()
+        args = ["list", "--json", "--sync"] + (["--since", sync.cursor] if sync.cursor else [])
+        code, out, err = run_remote(config, host, args)
+        if code == 2 and "--sync" in err:
+            # A host older than incremental refresh; argparse names the flag it refused.
+            sync.supported = False
+            return remote_snapshot(config, host, sync)
+        if code not in (0, 6):
+            raise ssh_failure(host, code, err)
+        payloads, summary = parse_payloads(host, out)
+        if summary is None:
+            # A host that answers without a summary ignored the flags and so sent
+            # every row: use them as a full listing, and stop asking.
+            sync.supported = False
+            return _plain(host, sync, payloads, err, code)
+        sync.supported = True
+        merged = dict(sync.payloads) if sync.cursor else {}
+        merged.update((str(payload["key"]), payload) for payload in payloads)
+        prints = {key: fingerprint(payload) for key, payload in merged.items()}
+        if len(merged) == summary["count"] and digest(prints) == summary["digest"]:
+            sync.accept(merged, str(summary.get("cursor") or ""))
+            return Snapshot(rows_of(host, merged.values()), _issues(host, err, code), scope=host.name)
+        if not sync.cursor:
+            break  # Even a full answer disagrees with its own summary.
+    raise Unavailable(f"{host.name}: rows do not match the host's own summary; nothing was trusted")
+
+
+def _plain(host: Host, sync: SyncState, payloads, err: str, code: int) -> Snapshot:
+    """A full listing from a host without incremental refresh; still worth caching."""
+    sync.accept({str(payload["key"]): payload for payload in payloads}, "")
+    return Snapshot(rows_of(host, payloads), _issues(host, err, code), scope=host.name)
 
 
 def remote_search(config: Config, host: Host, query: str, full: bool = False) -> Snapshot:

@@ -373,3 +373,43 @@ def test_a_pasted_prompt_does_not_travel_with_every_refresh():
 def test_remote_queries_ask_ssh_to_compress(lab):
     argv = ssh_argv(lab.config, lab.config.resolve_host("me@venus"), ["list", "--json"])
     assert "Compression=yes" in argv
+
+
+@pytest.mark.asyncio
+async def test_panel_switches_from_one_host_to_another(remote):
+    # Switching compared "is remote" with "is remote", so going from one host to
+    # another host was taken for "already there" and silently ignored.
+    from fourtop.app import FourtopApp
+    from fourtop.services import Manager
+
+    load, _ = remote
+    config, _ = load()
+    lab_config = config.resolve_host("venus")
+    config.hosts["mars"] = type(lab_config)(name="mars", ssh="me@mars")
+    app = FourtopApp(Manager(config, lab_config))
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(.5)
+        app._switch_to("mars")
+        await pilot.pause(1)
+        assert app.manager.scope == "mars"
+        assert [row.host for row in app.shown] == ["mars"]
+        await pilot.press("q")
+
+
+def test_a_host_opens_with_its_last_rows_before_it_answers(remote):
+    from fourtop.services import Manager
+
+    load, _ = remote
+    config, host = load()
+    first = Manager(config, host)
+    assert first.cached_snapshot() is None
+    first.snapshot()
+    first.close()
+
+    config, host = load(mode="fail")  # the host is unreachable this time
+    again = Manager(config, host)
+    cached = again.cached_snapshot()
+    assert cached is not None and cached.cached and [row.key for row in cached.rows] == ["h_abc"]
+    with pytest.raises(Unavailable):
+        again.snapshot()
+    again.close()
