@@ -481,9 +481,10 @@ async def test_sessions_agents_started_for_themselves_are_hidden_until_asked():
 @pytest.mark.asyncio
 async def test_a_tap_selects_and_a_second_tap_opens(tmp_path):
     # On a phone a tap is how you select; opening on the first touch started
-    # sessions nobody meant to open.
-    from textual.events import Click
-
+    # sessions nobody meant to open. Real clicks, through Textual's dispatch:
+    # OptionList's own handler runs too unless prevented, which a direct call to
+    # the override never showed.
+    import asyncio as _asyncio
     opened = []
 
     class Recording(LocalDemo):
@@ -497,15 +498,17 @@ async def test_a_tap_selects_and_a_second_tap_opens(tmp_path):
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
         listing = app.query_one(SessionList)
-        target = listing.highlighted + 1
-        tap = SimpleNamespace(style=SimpleNamespace(meta={"option": target}))
-        await listing._on_click(tap)
+        first = listing.highlighted
+        # Row 2 is two lines tall, below the header and the first row.
+        offset = (10, 1 + 2 * 2)
+        await pilot.click(SessionList, offset=offset)
+        await pilot.click(SessionList, offset=offset)  # Termux: one touch, twice
         await pilot.pause(.2)
-        assert listing.highlighted == target and opened == []
-        await listing._on_click(tap)
+        assert listing.highlighted != first and opened == []
+        await _asyncio.sleep(SessionList.DUPLICATE_TAP + .05)
+        await pilot.click(SessionList, offset=offset)
         await pilot.pause(.4)
-        assert opened == [app._ids[target].split(":", 1)[1]]
-        assert Click  # the real event carries the option in style.meta, as faked here
+        assert opened == [app._ids[listing.highlighted].split(":", 1)[1]]
         await pilot.press("Q")
         await pilot.pause()
         if isinstance(app.screen, Confirm):

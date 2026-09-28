@@ -325,7 +325,19 @@ class SessionList(OptionList):
     row that has scrolled out of view.
     """
 
+    # Termux reports one touch as two press/release pairs 2-4 ms apart, which made a
+    # single tap select *and* open. A finger's double tap is 150 ms or more.
+    DUPLICATE_TAP = 0.12
+    _last_tap = 0.0
+
     async def _on_click(self, event) -> None:
+        # Textual also runs OptionList's own click handler, which selects at once,
+        # unless the default is prevented: that is what still opened on one tap.
+        event.prevent_default()
+        now = time.monotonic()
+        if now - self._last_tap < self.DUPLICATE_TAP:
+            return
+        self._last_tap = now
         clicked = event.style.meta.get("option")
         if clicked is None or self._options[clicked].disabled:
             return
