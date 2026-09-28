@@ -80,3 +80,4 @@ class Snapshot:
     issues: list[str] = field(default_factory=list)
     observed_at: str = field(default_factory=utc_now)
     scope: str = "local"
+    cached: bool = False  # rows from the last visit, shown while the host is asked again

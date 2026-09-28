@@ -19,7 +19,10 @@ A remote host is reached with the `ssh` you already configured; 4top adds no
 credential store, opens no port and starts no service. The ssh control socket lives
 inside private state (0700). Remote rows necessarily carry that machine's project
 paths and history locations to the local view, and a remote action runs on the
-remote machine with the remote CLI's permissions.
+remote machine with the remote CLI's permissions. The last rows seen from each host
+(titles capped at 200 characters, paths, times) are cached in the private cache
+directory so the panel can show a host before it answers; delete that directory to
+drop them.
 
 Original authentication remains the agent's responsibility. 4top is not a sandbox:
 an agent can modify its project and native store and can perform paid network

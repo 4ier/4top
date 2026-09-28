@@ -5,6 +5,7 @@ a terminal or a multiplexer, so nothing here tracks liveness.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import threading
@@ -25,9 +26,10 @@ from session_ls.api import (
 from .agents import Drivers
 from .config import Config, Host
 from .errors import Conflict, FourtopError, Missing
-from .hosts import remote_check, remote_preview, remote_search, remote_snapshot, ssh_argv
+from .hosts import remote_check, remote_preview, remote_search, remote_snapshot, rows_of, ssh_argv
 from .models import LaunchPlan, Session, Snapshot
 from .state import StateStore
+from .sync import SyncState
 
 
 def unique(items, query: str, keys):
@@ -80,12 +82,22 @@ class Manager:
         else:
             self.remote = True
             self.index = None
+            name = hashlib.sha256(host.name.encode()).hexdigest()[:16]
+            self.sync = SyncState(config.cache_dir / "remote" / f"{name}.json",
+                                  identity=f"{host.ssh}\n{host.command}")
             self._remote = Snapshot([], scope=host.name)
             self._remote_at = 0.0
+            if self.sync.load():
+                self._remote = Snapshot(rows_of(host, self.sync.payloads.values()),
+                                        scope=host.name, cached=True)
 
     @property
     def scope(self) -> str:
         return "local" if self.host is None else self.host.name
+
+    def cached_snapshot(self) -> Snapshot | None:
+        """Rows from the last visit to this host, if any, to show while it is asked again."""
+        return self._remote if self.host is not None and self._remote.cached else None
 
     def history(self, force=False) -> ScanResult:
         with self._history_lock:
@@ -100,7 +112,7 @@ class Manager:
         if self.host is not None:
             now = time.monotonic()
             if load_history or now - self._remote_at >= self.host.refresh_seconds:
-                self._remote = remote_snapshot(self.config, self.host)
+                self._remote = remote_snapshot(self.config, self.host, self.sync)
                 self._remote_at = now
             return self._remote
         history = self.history() if load_history else self._history

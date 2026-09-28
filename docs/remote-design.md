@@ -22,6 +22,16 @@ anything 4top does remotely is something a person could type.
   `search --json`, `preview`, `doctor --json`. Rows keep `schema_version`.
 - `ssh -o BatchMode=yes`: never prompt, fail fast, surface the failure as an issue.
   A failed query must never render as an empty machine.
+- **Incremental refresh.** The panel asks `list --json --sync --since CURSOR` and
+  receives only the rows written since the cursor, then one summary line with the
+  count of all rows and a digest over every row's fingerprint. The client merges and
+  recomputes the digest; a mismatch (a deleted transcript, a status change, a clock
+  that moved back) triggers one full listing. An unchanged host of 2773 sessions
+  answers in about 650 bytes instead of 1.7 MB. A host without `--sync` gets plain
+  `list --json`, and is not asked again.
+- **Cached rows.** The last proven rows per host are kept in the private cache, so
+  the panel shows a host immediately and marks the view "cached, updating…" until
+  the host answers.
 - Connection reuse via `ControlMaster`/`ControlPersist`, with the control socket
   inside private state. Without it every refresh pays a full handshake.
 - **Version handshake.** A remote `schema_version` that does not match the local

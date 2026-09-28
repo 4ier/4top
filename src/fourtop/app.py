@@ -373,7 +373,14 @@ class FourtopApp(App[tuple | None]):
         if not self.manager.remote:
             self.set_interval(self.manager.config.history_refresh_seconds, self.refresh_history)
             self.run_worker(self.refresh_history())
+        self._show_cached()
         await self.refresh_rows()
+
+    def _show_cached(self):
+        cached = getattr(self.manager, "cached_snapshot", lambda: None)()
+        if cached is not None:
+            self.snapshot_data = cached
+            self.render_rows()
 
     def on_resize(self, event):
         if self.is_mounted:
@@ -494,6 +501,8 @@ class FourtopApp(App[tuple | None]):
         label = f"{total} sessions · {self.snapshot_data.scope} · {scope} · {len(rows)} shown"
         if self.stale:
             label += " · STALE"
+        elif self.snapshot_data.cached:
+            label += " · cached, updating…"
         if self.manager.demo:
             label = "SYNTHETIC DEMO · no real data or processes  /  " + label
         self.query_one("#counts", Static).update(plain(label))
@@ -591,7 +600,7 @@ class FourtopApp(App[tuple | None]):
             return
         config = self.manager.config
         target = config.resolve_host(name or None)
-        if (target is not None) == self.manager.remote:
+        if (target.name if target else "local") == self.manager.scope:
             return  # Already looking at that scope.
         previous, self.manager = self.manager, Manager(config, target)
         previous.close()
@@ -612,6 +621,7 @@ class FourtopApp(App[tuple | None]):
         self.set_status(f"Switching to {self.manager.scope}…")
         if not self.manager.remote:
             self.run_worker(self.refresh_history())
+        self._show_cached()
         self.run_worker(self.refresh_rows())
 
     def action_full_search(self):

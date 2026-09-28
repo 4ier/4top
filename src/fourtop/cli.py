@@ -13,8 +13,9 @@ from session_ls.storage import StorageError
 from . import __version__
 from .config import Config
 from .errors import Conflict, Dependency, FourtopError
-from .models import LaunchPlan, age
+from .models import ROW_SCHEMA, LaunchPlan, age
 from .services import DemoManager, Manager
+from .sync import changed_since, trailer
 
 COMMANDS = (
     ("list", "List native sessions (JSON Lines with --json)"),
@@ -51,6 +52,10 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("--project", help="Case-insensitive project path substring")
         if command == "list":
             sub.add_argument("--query", default="", help="Same literal metadata match as the TUI search")
+            sub.add_argument("--sync", action="store_true",
+                             help="Append a summary of all rows (for a remote panel; with --json)")
+            sub.add_argument("--since", default="",
+                             help="With --sync: only rows written at or after this cursor")
         if command == "search":
             sub.add_argument("query")
             sub.add_argument("--full", action="store_true", help="Explicit decoded literal full-content search")
@@ -131,6 +136,18 @@ def _display(snapshot, as_json=False, agent=None, project=None) -> int:
     return 6 if snapshot.issues else 0
 
 
+def _display_sync(snapshot, since="", agent=None, project=None) -> int:
+    """Rows written since the cursor, then one line summarising every row."""
+    payloads = [row.json() for row in snapshot.rows if (not agent or row.agent == agent)
+                and (not project or project.casefold() in row.cwd.casefold())]
+    for payload in changed_since(payloads, since):
+        print(json.dumps(payload, ensure_ascii=False))
+    print(json.dumps({"schema_version": ROW_SCHEMA, "sync": trailer(payloads)}, ensure_ascii=False))
+    for issue in snapshot.issues:
+        print("4top: " + clean_text(issue), file=sys.stderr)
+    return 6 if snapshot.issues else 0
+
+
 def _hand_over(manager, plan: LaunchPlan) -> int:
     manager.hand_over(plan)
     raise AssertionError("exec failed to replace this process")
@@ -162,6 +179,8 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
         if command in ("list", "search"):
             snapshot = (manager.search(args.query, args.full) if command == "search"
                         else manager.snapshot())
+            if command == "list" and args.sync:
+                return _display_sync(snapshot, args.since, args.agent, args.project)
             return _display(snapshot, args.json, args.agent, args.project)
         if command == "preview":
             row = manager.resolve_row(args.key)

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- A remote panel refreshes incrementally: only rows written since the last refresh
+  travel, with a digest that proves the merged view equals the host's own rows and
+  falls back to one full listing when it does not. An unchanged host of 2773
+  sessions answers in about 650 bytes instead of 1.7 MB.
+- The last rows of each host are cached, so switching to a host shows it at once and
+  then catches up.
+- Switching the panel from one remote host to another did nothing; it compared
+  "remote" with "remote" and took them for the same view.
 - A remote panel no longer downloads every session's full first prompt on every
   refresh. The title in a JSON row is capped at 200 characters; one Mac's
   `list --json` was 15.8 MB because of a single 100 KB pasted prompt, and a tablet
