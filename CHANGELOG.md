@@ -19,6 +19,8 @@ Found by driving the panel on an Android tablet (Termux, 113×54, over the tailn
   and ages now advance instead of freezing at the moment the list was built.
 - Rows no longer wrap for a few seconds after the layout splits; machine headers are
   no longer dimmed; the list takes about two fifths of a wide screen.
+- An agent on another host no longer dies with the panel: it used the panel's ssh
+  master, which closing the panel's pane hung up. Each agent has its own connection.
 - Running `4top` again brings the list back into a layout whose list had exited
   (an upgrade, a crash), without touching the agents that kept running.
 

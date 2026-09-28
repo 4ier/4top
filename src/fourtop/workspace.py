@@ -127,7 +127,7 @@ def revive(tmux: str, name: str, panel: list[str], env: dict[str, str]) -> None:
         run("respawn-pane", "-k", "-t", mine[0][0], "--", *panel)
         run("select-window", "-t", mine[0][0])
     else:
-        run("new-window", "-t", SESSION, "-n", "4top", "--", *panel)
+        run("new-window", "-t", f"{SESSION}:", "-n", "4top", "--", *panel)
 
 
 @dataclass(frozen=True)

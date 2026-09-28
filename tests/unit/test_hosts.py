@@ -400,3 +400,12 @@ def test_an_unreachable_host_is_retried_on_its_interval_not_every_tick(remote):
         manager.snapshot(False)
     assert not manager.due(), "a failure waits for the next interval"
     manager.close()
+
+
+def test_an_agent_connection_does_not_ride_on_the_panels_master(lab):
+    # The master belongs to the panel; an agent multiplexed over it died with it.
+    host = lab.config.resolve_host("me@venus")
+    agent = ssh_argv(lab.config, host, ["resume", "h_x", "--yes"], tty=True)
+    assert "ControlPath=none" in agent and "ControlMaster=no" in agent and "-t" in agent
+    query = ssh_argv(lab.config, host, ["list", "--json"])
+    assert any(value.startswith("ControlPath=") and value != "ControlPath=none" for value in query)

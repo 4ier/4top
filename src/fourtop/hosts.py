@@ -63,10 +63,13 @@ def ssh_argv(config: Config, host: Host, args: list[str], *, tty: bool = False) 
     remote argument is quoted for that shell rather than trusted as a literal."""
     options = [*SSH_OPTIONS, "-o", f"ConnectTimeout={max(1, int(host.timeout_seconds))}"]
     directory = control_dir(config)
-    if directory:
-        options = [*options, *SSH_MULTIPLEX, "-o", f"ControlPath={directory}/%C"]
     if tty:
-        options.append("-t")
+        # An agent gets a connection of its own. Multiplexed over the panel's
+        # ControlMaster, it died with the panel: closing the panel's pane hangs up
+        # its process group, the master with it, and every agent riding on it.
+        options += ["-o", "ControlMaster=no", "-o", "ControlPath=none", "-t"]
+    elif directory:
+        options = [*options, *SSH_MULTIPLEX, "-o", f"ControlPath={directory}/%C"]
     remote = " ".join(shlex.quote(value) for value in (host.command, *args))
     return ["ssh", *options, host.ssh, remote]
 
