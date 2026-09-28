@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Placeholders no longer pile up in background windows when an agent on the stage
+  is killed from outside or an older panel left one behind: the waiting one is
+  brought back, and extras are closed when the panel starts.
+
 Found by driving the panel on an Android tablet (Termux, 113×54, over the tailnet).
 
 - Idle CPU fell from 8% to about 3% of one core (the bare framework is about 1.5%):
