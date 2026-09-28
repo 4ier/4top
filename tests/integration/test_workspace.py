@@ -82,3 +82,19 @@ def test_a_layout_that_outlived_its_list_gets_the_list_back(layout, tmp_path):
     revive("tmux", env["FOURTOP_TMUX_SOCKET"], ["sh", "-c", "sleep 600"], env)
     assert dead() == "0", "the list runs again in the same place"
     assert "local:a" in workspace.panes(), "the agent was never touched"
+
+
+def test_placeholders_never_pile_up(layout, tmp_path):
+    workspace, tmux, env = layout
+    workspace.open("local:a", ["sh", "-c", "sleep 600"], str(tmp_path), {}, "a")
+    # The agent on the stage is killed from outside: its window's placeholder waits.
+    subprocess.run([*tmux, "kill-pane", "-t", workspace.panes()["local:a"].id], env=env)
+    workspace.ensure_layout(160)
+    workspace.ensure_layout(160)
+
+    def placeholders():
+        out = subprocess.run([*tmux, "list-panes", "-a", "-F", "#{@fourtop-stage}"],
+                             capture_output=True, text=True, env=env).stdout
+        return out.split().count("1")
+    assert placeholders() == 1
+    assert stage_key(tmux, env, workspace.panel) == ""

@@ -168,16 +168,33 @@ class Workspace:
         others = [pane for pane in self._window_panes() if pane != self.panel]
         if others:
             return others[0]
+        # The stage went missing (its agent was killed from outside, or an older
+        # panel left it behind): bring the waiting placeholder back rather than
+        # starting another one, so they never pile up in background windows.
+        spare = self._placeholder()
+        if spare:
+            self.run("join-pane", "-h", "-d", "-s", spare, "-t", self.panel)
+            return spare
         pane = self.run("split-window", "-h", "-d", "-t", self.panel, "-P", "-F", "#{pane_id}",
                         PLACEHOLDER).strip()
         self.run("set-option", "-p", "-t", pane, STAGE, "1")
         return pane
 
+    def tidy(self) -> None:
+        """Keep one placeholder: the one on the stage, or the one waiting for it."""
+        stage = self.stage()
+        out = self.run("list-panes", "-a", "-F", f"#{{pane_id}}\t#{{{STAGE}}}")
+        spares = [pane for pane, tag in (line.split("\t") for line in out.splitlines())
+                  if tag == "1" and pane != stage]
+        on_stage = self.run("display-message", "-p", "-t", stage, f"#{{{STAGE}}}").strip() == "1"
+        for pane in spares[0 if on_stage else 1:]:
+            self.run("kill-pane", "-t", pane)
+
     def ensure_layout(self, width: int) -> None:
         # Mark the list's pane and keep it when it exits, so `4top` can revive it.
         self.run("set-option", "-p", "-t", self.panel, PANEL, "1")
         self.run("set-option", "-p", "-t", self.panel, "remain-on-exit", "on")
-        self.stage()
+        self.tidy()
         self.fit(width)
         if width < NARROW:
             self.focus_panel()  # a narrow screen starts with the list alone
