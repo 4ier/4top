@@ -234,6 +234,15 @@ class Workspace:
             self.run("swap-pane", "-d", "-s", pane, "-t", stage)
         self._zoom(pane)
 
+    def zoom_panel(self, on: bool) -> None:
+        """Give the list the whole window (a preview to read) or take it back."""
+        zoomed, width = self.run("display-message", "-p", "-t", self.panel,
+                                 "#{window_zoomed_flag} #{window_width}").split()
+        if on and zoomed == "0":
+            self.run("resize-pane", "-Z", "-t", self.panel)
+        elif not on and zoomed == "1" and int(width) >= NARROW:
+            self.run("resize-pane", "-Z", "-t", self.panel)  # a narrow screen stays zoomed
+
     def focus_panel(self) -> None:
         self._zoom(self.panel)
 

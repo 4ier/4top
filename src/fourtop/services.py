@@ -204,7 +204,10 @@ class Manager:
             page = excerpt(row.record, start, max_bytes=chunk_end - start, max_lines=10**6)
             lines = [line for line in page.lines if not _injected_line(line)] + lines
             # Starting mid-file cuts the first line in half; that is expected, not damage.
-            issues += [issue for issue in page.issues if not (start and "partial" in issue)]
+            # A partial or malformed line is a parser's note, not part of the
+            # conversation a person is reading; it is left out of the preview.
+            issues += [issue for issue in page.issues if "partial" not in issue.lower()
+                       and "malformed" not in issue.lower()]
         lines = lines[-self.config.preview_max_lines:]
         body = "\n\n".join(lines) or "No conversation text in this part of the transcript."
         if issues:

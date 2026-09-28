@@ -42,6 +42,7 @@ def project(cwd: str) -> str:
 
 
 AWAY_REFRESH = 60.0
+HOLD_ORDER = 3.0  # seconds after an input during which rows do not move
 
 
 def when(last: str) -> str:
@@ -458,6 +459,7 @@ class FourtopApp(App[tuple | None]):
         self.show_subagents = False
         self.update_notice = None
         self._away = False
+        self._last_input = 0.0
         self.opened: dict[str, object] = {}  # tag -> tmux pane, as tmux reports it
         self.busy: dict[str, str] = {}  # tag -> what is happening to it right now
         self._signature = None
@@ -530,6 +532,15 @@ class FourtopApp(App[tuple | None]):
             if self.workspace:
                 self.run_worker(asyncio.to_thread(self.workspace.fit, event.size.width))
 
+    def _holding(self) -> bool:
+        return time.monotonic() - self._last_input < HOLD_ORDER
+
+    def on_key(self, event) -> None:
+        self._last_input = time.monotonic()
+
+    def on_click(self, event) -> None:
+        self._last_input = time.monotonic()
+
     def on_app_blur(self, event) -> None:
         """The agent beside the list has the keyboard: say so, and dim the selection,
         so typing is never mistaken for typing into the list."""
@@ -563,7 +574,7 @@ class FourtopApp(App[tuple | None]):
 
     async def refresh_rows(self):
         await asyncio.gather(*(self._refresh(source, render=False) for source in self.sources))
-        self.render_list()
+        self.render_list(refreshed=True)
 
     async def _refresh(self, source: Source, render: bool = True):
         if source.refreshing or self._fourtop_closing:
@@ -591,7 +602,7 @@ class FourtopApp(App[tuple | None]):
         finally:
             source.refreshing = False
         if render:
-            self.render_list()
+            self.render_list(refreshed=True)
 
     async def poll_workspace(self):
         if not self.workspace or self._fourtop_closing:
@@ -672,7 +683,7 @@ class FourtopApp(App[tuple | None]):
         index = self.sources.index(self.current_source())
         return self.page_sizes({i: self._visible(s) for i, s in enumerate(self.sources)})[index]
 
-    def render_list(self):
+    def render_list(self, refreshed: bool = False):
         """Rebuild the list only when what it shows has changed.
 
         This runs on every refresh tick, so the comparison is made on plain values
@@ -703,12 +714,19 @@ class FourtopApp(App[tuple | None]):
                 tag = f"{source.name}:{row.key}"
                 rows[tag] = (source, row)
                 layout.append(("r", tag, row))
-        self._rows = rows
         signature = (width, tuple(
             (kind, key, value.plain) if kind == "h" else (kind, key, value) if kind == "e" else
             (kind, key, value.title, when(value.last), value.cwd, value.agent, value.can_resume,
              key in self.opened, self.busy.get(key), state(value), value.last_request, value.branch)
             for kind, key, value in layout))
+        if refreshed and signature != self._signature and self._holding():
+            # Sessions at work move to the top as they write. Moving rows under a
+            # finger or a key press changes what it lands on, so a reorder waits
+            # until the person has been still for a moment.
+            self.set_timer(HOLD_ORDER, lambda: self.render_list(refreshed=True))
+            self._render_chrome(width)
+            return  # rows, and what Enter acts on, stay those on screen
+        self._rows = rows
         if signature != self._signature:
             self._signature = signature
             options = []
@@ -1009,17 +1027,31 @@ class FourtopApp(App[tuple | None]):
 
     # ----- actions on a session --------------------------------------------------
 
+    def _modal(self, screen, callback=None):
+        """Show a reading screen over the whole terminal, not just the list's column:
+        in the layout the list's pane is zoomed while it is open."""
+        zoomed = bool(self.workspace)
+        if zoomed:
+            self.run_worker(asyncio.to_thread(self.workspace.zoom_panel, True))
+
+        def done(result):
+            if zoomed and not self._fourtop_closing:
+                self.run_worker(asyncio.to_thread(self.workspace.zoom_panel, False))
+            if callback:
+                callback(result)
+        self.push_screen(screen, done)
+
     def action_preview(self):
         row = self.current()
         if row:
-            self.push_screen(Preview(self.current_source().manager, row))
+            self._modal(Preview(self.current_source().manager, row))
 
     def action_details(self):
         row = self.current()
         if row:
             source = self.current_source()
-            self.push_screen(Details(row, self.manager.demo),
-                             lambda action: self._detail_action(source, row, action))
+            self._modal(Details(row, self.manager.demo),
+                        lambda action: self._detail_action(source, row, action))
 
     def _detail_action(self, source, row, action):
         if action == "resume" and not self.manager.demo:
@@ -1094,6 +1126,7 @@ class FourtopApp(App[tuple | None]):
             try:
                 await asyncio.to_thread(self.workspace.open, tag, argv, directory, env, name)
                 self.opened = await asyncio.to_thread(self.workspace.panes)
+                self.set_status("")  # an "Ended: …" note about this session is now stale
             except FourtopError as exc:
                 self.set_status(str(exc))
             finally:
@@ -1176,23 +1209,29 @@ class FourtopApp(App[tuple | None]):
         return f"the agent exited {code}."
 
     def action_help(self):
-        layout = ("Alt-← / Alt-→ or → : move between the list and the agent.\n"
-                  "Opened sessions keep running when you open another; ● marks them.\n"
-                  "q detaches: agents keep running, and 4top reattaches.  Q closes everything.\n"
-                  if self.workspace else
-                  "Enter runs the agent in this terminal; the list returns when it exits.\n"
-                  "Install tmux to keep the list beside the agent.\n")
-        self.push_screen(Info("4top", "\n".join((
-            "↑ ↓  select      Enter  open      Space  preview      i  details",
-            "/  search        p  project        [ ]  page within a machine",
-            "Ctrl-F  full-content search         n  new agent on the selected machine",
-            "f  fold the machine under the cursor.  a  show sessions agents started for",
-            "themselves (hidden by default).  r  refresh.  Esc  clear filters.",
+        # Short lines: the list is often 40-60 columns wide beside an agent.
+        lines = [
+            "↑ ↓      select        Enter   open",
+            "Space    preview       i       details",
+            "/        search        Ctrl-F  full content",
+            "p        one project   f       fold machine",
+            "[ ]      page          a       subagents",
+            "n        new agent     r       refresh",
+            "Esc      clear filters",
             "",
-            layout,
-            "Opening starts the agent again from its transcript.",
-            "4top makes no model calls and sends no telemetry.",
-        ))))
+        ]
+        if self.workspace:
+            lines += ["Alt-← Alt-→  list / agent (or →, or tap)",
+                      "● open: keeps running when you switch",
+                      "q  detach (agents keep running)",
+                      "Q  close everything"]
+        else:
+            lines += ["Enter runs the agent here; the list",
+                      "returns when it exits. With tmux it",
+                      "stays beside the agent instead."]
+        lines += ["", "Opening restarts the agent from its",
+                  "transcript. No model calls, no telemetry."]
+        self._modal(Info("4top", "\n".join(lines)))
 
     def _save_view(self):
         # A remote key belongs to another machine's history, so only a local selection

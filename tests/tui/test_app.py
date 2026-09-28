@@ -224,6 +224,9 @@ class FakeWorkspace:
     def show(self, pane):
         self.calls.append(("show", pane))
 
+    def zoom_panel(self, on):
+        self.calls.append(("zoom", on))
+
     def detach(self):
         self.calls.append(("detach",))
 
@@ -566,3 +569,37 @@ async def test_rows_say_what_each_session_is_doing_and_was_last_asked():
     old = DemoManager().rows[0]
     old = replace(old, last=(datetime.now(timezone.utc) - timedelta(days=3)).isoformat())
     assert state(old) == "", "a days-old session is history, not a task in flight"
+
+
+@pytest.mark.asyncio
+async def test_rows_hold_still_while_the_person_is_acting():
+    # Sessions at work jump to the top as they write; a row moving under a finger
+    # changes what the tap lands on. A refresh waits until input has paused.
+    manager = DemoManager()
+    app = FourtopApp(manager)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        before = [row.key for row in app.shown]
+        await pilot.press("down")
+        manager.rows.insert(0, replace(manager.rows[3], key="jumped"))
+        await app.refresh_rows()
+        assert [row.key for row in app.shown] == before, "held while acting"
+        await pilot.pause(3.3)
+        assert app.shown[0].key == "jumped", "and applied once the person is still"
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_reading_screens_take_the_whole_window_in_the_layout():
+    workspace = FakeWorkspace()
+    app = FourtopApp(DemoManager(), workspace=workspace)
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        await pilot.press("space")
+        await pilot.pause(.2)
+        assert isinstance(app.screen, Preview) and ("zoom", True) in workspace.calls
+        await pilot.press("escape")
+        await pilot.pause(.2)
+        assert workspace.calls[-1] == ("zoom", False)
+        await pilot.press("Q")
+        await pilot.pause()
