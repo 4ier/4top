@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- One tap on a touch screen still opened a session: Textual runs OptionList's own
+  click handler after an override unless the default is prevented. It is now, and a
+  touch that Termux reports twice within 120 ms counts once. Found on the tablet;
+  the test now clicks through Textual instead of calling the handler.
+
 - `contrib/termux/route` falls back to the LAN address when the tailnet path fails
   before connecting: with the jump host asleep, a NAS behind it showed as
   unreachable from a tablet on the same Wi-Fi.
