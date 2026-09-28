@@ -259,3 +259,10 @@ def test_check_reports_why_an_installed_cli_cannot_run(lab, tmp_path):
     assert report["resumable"] is False
     assert "does not advertise a resume interface" in report["reason"]
     assert "env: node: No such file or directory" in report["reason"], report["reason"]
+
+
+@pytest.mark.parametrize("text", ['[agents.pi]\nargs = "--flag"\n', '[agents.pi]\nargs = [""]\n',
+                                  '[ui]\nlayout = "split"\n', '[ui]\nrows_per_host = -1\n'])
+def test_layout_and_agent_arguments_are_validated(lab, text):
+    with pytest.raises(FourtopError):
+        lab.write_config(text)

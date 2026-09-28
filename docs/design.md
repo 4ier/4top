@@ -23,18 +23,26 @@ can be found immediately afterwards. `plan_resume` reopens the approved source
 immediately before planning, refuses an agent/root mismatch, and requires an exact
 UUID for Claude and Codex rather than guessing "the latest".
 
-No module owns, supervises, kills or re-parents a process. 4top starts
-the native CLI in the calling terminal and becomes it (`execvpe` from the CLI) or
-waits for it (TUI, which suspends first). Persistence across a disconnect is the
-user's multiplexer, not 4top's business.
+No module supervises or re-parents a process, and none keeps a record of one.
+The CLI becomes the native agent (`execvpe`). The panel either runs it in the
+calling terminal and waits (plain layout), or, in the tmux layout
+(`fourtop.workspace`), starts it in a window of 4top's own tmux server and swaps
+its pane beside the list. A pane is tagged with its session and tmux is asked what
+is open each time; a pane whose agent exited is closed on the next poll. The
+earlier runtime failed by keeping its own records of panes, exit codes and
+zombies, which drifted from reality. This layer keeps none. `q` detaches the tmux
+client, so agents survive a closed laptop or a dropped phone link.
 
 ## Remote hosts
 
 `fourtop.hosts` is the only network code. A host is one `ssh` destination plus an
 optional command path. The local side runs the remote CLI's read-only commands
-(`list --json`, `search --json`, `preview`, `doctor --json`) with
-`BatchMode=yes`, a `ControlMaster` socket inside private state, and a hard
-timeout; anything that starts a process is handed to `ssh -t` instead.
+(`list --json --sync`, `search --json`, `preview`, `check`, `doctor --json`) with
+`BatchMode=yes`, compression, a `ControlMaster` socket inside private state, and a
+hard timeout; anything that starts a process is handed to `ssh -t` instead.
+`fourtop.sync` makes refresh incremental: only rows written since a cursor travel,
+and a digest over every row proves the merged view equal to the host's, or one
+full listing follows.
 
 Three rules keep a remote from being trusted blindly. Every remote argument is
 quoted for the remote shell because ssh joins its arguments into one string. A
@@ -56,7 +64,8 @@ that have never seen each other cannot derive the same key for the same session,
 which is why remote keys are treated as opaque.
 
 There are no embeddings, database server, daemon, agent loop, task-duration caps,
-concurrency quotas, automatic model summaries or automatic permission bypasses.
+concurrency quotas, automatic model summaries or automatic permission bypasses. A
+permission mode is only ever an `[agents.NAME] args` entry the user wrote.
 
 ## Refresh and UI
 
@@ -66,11 +75,11 @@ search from replacing a newer query. Stable keys preserve the selection as new
 rows arrive. Failed sources keep the previous rows visible and are reported as
 issues rather than as an empty machine.
 
-Rendering a large store is the one measured performance limit: text sanitization
-is expensive, so each row keeps its rendered cells and its derived labels (age
-bucket, project name) until the row itself or the age bucket changes. A 2.7k-row
-store renders in under two milliseconds per tick; the same loop cost about 50 ms
-before the cache existed.
+The panel lists every source at once, one section per machine, and each shows one
+page of rows. Page sizes are shared out by need, so a machine with few sessions
+leaves its space to the others. Only the visible page is rendered, and the list is
+rebuilt only when what it shows changes, so a 2.7k-row store costs one page of
+rows per tick, not the whole store.
 
 ANSI/OSC/control data and Rich markup are not trusted. All record-derived output
 is rendered literally. Preview is bounded and paged; it sends no keystrokes.
@@ -78,10 +87,10 @@ The Pi preview is file order, explicitly not a reconstruction of its active tree
 
 ## Deliberate alpha limits
 
-No liveness tracking, no process migration, no semantic status inference, no automatic Codex-history binding, no auto-restart, no worktree
-isolation and no Cursor runtime driver. Remote hosts are view-scoped rather than
-merged, and polling over ssh is the ceiling: push updates would require a daemon
-and are out of scope.
+No liveness records (only tmux's own answer), no process migration, no semantic
+status inference, no automatic Codex-history binding, no auto-restart, no worktree
+isolation and no Cursor runtime driver. Polling over ssh is the ceiling: push
+updates would require a daemon and are out of scope.
 
 No compatibility certification without real native-version smoke tests. State
 schema 1 and row schema 2 are the current implementations; unknown future schemas

@@ -124,7 +124,9 @@ class Drivers:
         capability = self.probe(agent)
         native_id = str(uuid.uuid4()) if capability.allocate_id else None
         root = self.config.root(agent).path
-        args = [executable]
+        configured = self.config.agent_args.get(agent, ())
+        validate_extra(agent, configured)
+        args = [executable, *configured]
         if native_id:
             args.extend(["--session-id", native_id])
         args.extend(extra)
@@ -151,12 +153,14 @@ class Drivers:
             raise Dependency("Installed CLI did not advertise a supported resume interface (--help)")
         if record.agent in ("claude", "codex") and not is_uuid(record.native_id):
             raise Dependency("An exact UUID is required; 4top will not guess the latest session")
+        configured = self.config.agent_args.get(record.agent, ())
+        validate_extra(record.agent, configured)
         if record.agent == "claude":
-            args = (capability.executable, "--resume", record.native_id)
+            args = (capability.executable, *configured, "--resume", record.native_id)
         elif record.agent == "codex":
-            args = (capability.executable, "resume", record.native_id)
+            args = (capability.executable, *configured, "resume", record.native_id)
         else:
-            args = (capability.executable, "--session", record.file)
+            args = (capability.executable, *configured, "--session", record.file)
         env = dict(self.config.environment)
         return LaunchPlan(record.agent, capability.executable, args, cwd, env, record.root,
                           record.native_id, record.key)

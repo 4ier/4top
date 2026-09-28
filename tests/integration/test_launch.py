@@ -120,3 +120,28 @@ def test_plan_passes_the_caller_environment_without_relocating_config(lab):
     assert plan.environment["TEST_CANARY"] == lab.env["TEST_CANARY"]
     # An absent override is meaningful: setting it would move Claude's config lookup.
     assert "CLAUDE_CONFIG_DIR" not in plan.environment
+
+
+def test_configured_arguments_join_every_launch_but_cannot_retarget_it(lab):
+    # A permission mode is the user's choice, written in their configuration.
+    config = lab.write_config('[agents.claude]\nargs = ["--dangerously-skip-permissions"]\n'
+                              '[agents.codex]\nargs = ["--dangerously-bypass-approvals-and-sandbox"]\n')
+    from fourtop.services import Manager
+    manager = Manager(config)
+    native = "11111111-2222-3333-4444-555555555555"
+    target = Path(config.root("claude").path) / "projects/test" / (native + ".jsonl")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps({"type": "user", "sessionId": native, "cwd": str(lab.path),
+                                  "timestamp": "2026-09-24T00:00:00Z",
+                                  "message": {"role": "user", "content": "keep me"}}) + "\n")
+    plan = manager.resume(native)
+    assert plan.argv == (plan.executable, "--dangerously-skip-permissions", "--resume", native)
+    fresh = manager.new("codex", str(lab.path))
+    assert fresh.argv[1] == "--dangerously-bypass-approvals-and-sandbox"
+
+    retarget = lab.write_config('[agents.claude]\nargs = ["--resume", "someone-else"]\n')
+    import pytest
+
+    from fourtop.errors import FourtopError
+    with pytest.raises(FourtopError):
+        Manager(retarget).resume(native)

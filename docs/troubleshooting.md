@@ -18,6 +18,9 @@ directory is a hard error; 4top will not reset identity behind your back.
 | Remote agent missing | The host that owns the session must have that agent installed. `4top --host NAME check KEY` says so before the panel hands the terminal over. |
 | Remote agent "not found" although it is installed | A non-interactive ssh session gets a minimal `PATH` (on macOS `~/.local/bin:/usr/bin:/bin:...`), so the host's own agents need absolute paths in its configuration too: `[agents.pi] executable = "..."`. `4top --host NAME doctor` shows which of them the remote can resolve. |
 | Link dropped mid-resume | The session is unchanged in its transcript on that host; resume it again when the link is back. Keep agents alive across a drop with your own terminal multiplexer there. |
+| Claude asks to log in when opened on a Mac over ssh | macOS keeps Claude Code's login in the Keychain, which an ssh session cannot read, so `claude auth status` over ssh says `loggedIn: false` while the same Mac's own terminal is logged in. Create a long-lived token on that Mac with `claude setup-token` and make it available to ssh sessions as `CLAUDE_CODE_OAUTH_TOKEN`, for example from the wrapper named in `[agents.claude].executable`. |
+| `Alt-←` / `Alt-→` do nothing | The terminal must send Option/Alt as Meta (macOS Terminal: "Use Option as Meta key"; iTerm2: Left Option = Esc+). `→` in the list and a mouse click always work. |
+| Do not want the tmux layout | Set `[ui] layout = "plain"`: Enter runs the agent in this terminal and the list returns when it exits. |
 | Remote host unreachable | `4top --host NAME doctor` shows the ssh exit and stderr. A missing key fails fast because `BatchMode` is always on. |
 | Remote `4top` not found | Non-login ssh shells may not have it on `PATH`; set `command` to an absolute path in `[hosts.NAME]`. |
 | Row schema mismatch | Update both machines to the same 4top version. Mismatched rows are refused, never partially parsed. |

@@ -59,7 +59,7 @@ def test_the_checker_notices_a_stale_command(tmp_path, monkeypatch):
 def test_the_checker_notices_removed_vocabulary(tmp_path, monkeypatch):
     checker = load_checker()
     stale = tmp_path / "docs.md"
-    stale.write_text("Run 4top inside tmux.\n", encoding="utf-8")
+    stale.write_text("Run 4top inside byobu.\n", encoding="utf-8")
     monkeypatch.setattr(checker, "tracked_files", lambda: [stale])
     problems = checker.reported()
     assert any("removed vocabulary" in problem for problem in problems), problems

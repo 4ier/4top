@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- The panel lists this machine and every configured host at once, one section each,
+  with its own page (`[` / `]`), refresh interval and state (`cached`,
+  `unreachable`, `partial`). `H` and host switching are gone; `--host` still scopes
+  the panel to one machine.
+- With tmux installed, 4top runs in a tmux server of its own and opens agents beside
+  the list. Opened sessions keep running in the background, `●` marks them, `q`
+  detaches and `Q` closes everything. It records nothing about them: panes are
+  tagged with their session and tmux is asked what is open. `[ui] layout = "plain"`
+  keeps the previous behaviour.
+- Enter opens a session without a confirmation dialog; the owning machine's check
+  runs first and a refusal is shown in the list.
+- Rows have two lines: the title, then agent, project and age. `p` shows one project
+  and `f` folds a machine.
+- `[agents.NAME] args` adds arguments to every start and resume of an agent, such as
+  a permission mode. They are validated like command-line extras.
 - A remote panel refreshes incrementally: only rows written since the last refresh
   travel, with a digest that proves the merged view equals the host's own rows and
   falls back to one full listing when it does not. An unchanged host of 2773
