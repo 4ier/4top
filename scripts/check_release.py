@@ -4,7 +4,7 @@
 PyPI versions are immutable: a published wheel can be yanked but never replaced, so
 every check here exists to stop a publish that cannot be taken back.
 
-    scripts/check_release.py v0.2.0a4             # tag and built artifacts
+    scripts/check_release.py v0.2.0a5             # tag and built artifacts
     scripts/check_release.py v0.2.0a1 --decide    # also ask PyPI what is new
 
 `session-ls` is not built here: it has its own repository and its own pipeline, and
@@ -31,7 +31,10 @@ from packaging.version import InvalidVersion, Version
 ROOT = Path(__file__).resolve().parents[1]
 ROOT_PACKAGE = "4top"
 DEPENDENCY_PACKAGE = "session-ls"
-PYPI_JSON = "https://pypi.org/pypi/{name}/json"
+# The simple index is what pip and uv resolve against. The per-project JSON document
+# is cached separately and lagged a fresh upload by minutes, which made this gate
+# refuse a release whose dependency was already installable.
+PYPI_SIMPLE = "https://pypi.org/simple/{name}/"
 
 
 def project(path: Path = ROOT / "pyproject.toml") -> dict:
@@ -58,8 +61,10 @@ def requirement(root: dict | None = None) -> SpecifierSet:
 
 def published_versions(name: str) -> set[str]:
     """Every version of a project on PyPI. Never guessed: an unreachable PyPI is an error."""
+    request = urllib.request.Request(PYPI_SIMPLE.format(name=name),
+                                     headers={"Accept": "application/vnd.pypi.simple.v1+json"})
     try:
-        with urllib.request.urlopen(PYPI_JSON.format(name=name), timeout=20) as response:
+        with urllib.request.urlopen(request, timeout=20) as response:
             payload = json.load(response)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
@@ -67,8 +72,8 @@ def published_versions(name: str) -> set[str]:
         raise SystemExit(f"cannot ask PyPI about {name}: HTTP {exc.code}") from None
     except (OSError, ValueError) as exc:
         raise SystemExit(f"cannot ask PyPI about {name}: {type(exc).__name__}") from None
-    releases = payload.get("releases")
-    return set(releases) if isinstance(releases, dict) else set()
+    versions = payload.get("versions")
+    return {str(version) for version in versions} if isinstance(versions, list) else set()
 
 
 def artifact_versions(dist: Path) -> set[tuple[str, str]]:

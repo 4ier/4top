@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4top 0.2.0a5 — 2026-09-28
 
 - The preview opens at the latest messages and pages back with Earlier (`e`); a
   transcript's opening is mostly injected context. `4top preview KEY --tail` is the

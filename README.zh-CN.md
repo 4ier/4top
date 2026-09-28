@@ -9,7 +9,7 @@
 
 ![4top 合成演示，未读取用户历史](docs/demo/demo.svg)
 
-> 当前为 **0.2.0a4 alpha**。装了 tmux 时，4top 把列表放在它打开的 agent 旁边；它不记录这些
+> 当前为 **0.2.0a5 alpha**。装了 tmux 时，4top 把列表放在它打开的 agent 旁边；它不记录这些
 > agent 的任何状态，哪些已打开一律现问 tmux。
 > Codex **0.155.1** 在早期版本上通过了已认证的精确恢复冒烟；
 > Claude Code、Pi 与其他原生版本未认证。
