@@ -6,7 +6,7 @@ Find your work. Resume an exact native session. Reach your other machines over S
 A keyboard-first terminal dashboard built on **session-ls**, with no extra 4top
 daemon, account, model calls, or telemetry.
 
-[中文](README.zh-CN.md) · [Compatibility](docs/compatibility.md) · [Remote hosts](docs/remote-design.md) · [Acceptance](docs/validation/README.md)
+[中文](README.zh-CN.md) · [Compatibility](docs/compatibility.md) · [Remote hosts](docs/remote-design.md) · [Phone or tablet](docs/mobile.md) · [Acceptance](docs/validation/README.md)
 
 ![4top synthetic demo — no real user history](docs/demo/demo.svg)
 

@@ -3,3 +3,4 @@ recursive-include docs *.md *.svg *.json
 recursive-include tests *.py
 recursive-include scripts *.py *.sh
 recursive-exclude * __pycache__ *.pyc
+recursive-include contrib *.go *.sh route tailscale *.run

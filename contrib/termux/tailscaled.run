@@ -1,0 +1,11 @@
+#!/data/data/com.termux/files/usr/bin/sh
+# termux-services unit: $PREFIX/var/service/tailscaled/run
+#
+# Userspace networking claims no VpnService, so a proxy app such as Clash keeps the
+# one Android allows. The fixed UDP port lets a proxy rule send tailscaled's
+# hole-punching traffic DIRECT if the proxy cannot bypass Termux entirely.
+termux-wake-lock
+state=$HOME/.local/state/tailscale
+mkdir -p "$state"
+exec tailscaled --tun=userspace-networking --socks5-server=127.0.0.1:1055 \
+    --port=41641 --statedir="$state" --socket="$state/tailscaled.sock" 2>&1
