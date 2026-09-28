@@ -41,7 +41,7 @@ mirror may lag behind for a new project: if `4top` seems not to exist, add
 git clone https://github.com/4ier/4top.git
 cd 4top
 python3 -m venv .venv
-.venv/bin/python -m pip install ./packages/session-ls .
+.venv/bin/python -m pip install .
 .venv/bin/4top --demo
 ```
 
@@ -204,7 +204,7 @@ retained. The only network access is the ssh you configured.
 ## Develop and contribute
 
 ```sh
-.venv/bin/python -m pip install -e ./packages/session-ls -e '.[dev]'
+.venv/bin/python -m pip install -e '.[dev]'
 .venv/bin/python -m pytest
 .venv/bin/python -m ruff check .
 uv tool install --force --editable .   # optional: `4top` runs this checkout

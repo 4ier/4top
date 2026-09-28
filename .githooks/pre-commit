@@ -17,6 +17,6 @@ fi
 
 # A staged change to the code that the docs describe is exactly what makes them
 # stale, so run the documentation gate and the host/panel tests then.
-if git diff --cached --name-only | grep -q '^\(src/fourtop\|packages/session-ls\)/'; then
+if git diff --cached --name-only | grep -q '^src/fourtop/'; then
     "$python" -m pytest -q -x tests/unit/test_docs.py tests/unit/test_hosts.py
 fi
