@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `contrib/termux/route` falls back to the LAN address when the tailnet path fails
+  before connecting: with the jump host asleep, a NAS behind it showed as
+  unreachable from a tablet on the same Wi-Fi.
 - Placeholders no longer pile up in background windows when an agent on the stage
   is killed from outside or an older panel left one behind: the waiting one is
   brought back, and extras are closed when the panel starts.
