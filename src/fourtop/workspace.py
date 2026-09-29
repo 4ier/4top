@@ -42,6 +42,10 @@ set -g focus-events on
 set -g history-limit 50000
 set -g default-terminal "{terminal}"
 set -as terminal-features ",*:RGB"
+# Modified keys such as Shift-Enter reach the agent, including a host's own tmux
+# nested in a pane. -q: an older tmux without these options still reads the rest.
+set -gq extended-keys on
+set -gq extended-keys-format csi-u
 set -g pane-border-lines single
 set -g pane-border-style "fg=colour238"
 set -g pane-active-border-style "fg=colour39"

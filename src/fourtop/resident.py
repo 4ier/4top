@@ -40,6 +40,10 @@ set -g focus-events on
 set -g history-limit 50000
 set -g default-terminal "{terminal}"
 set -as terminal-features ",*:RGB"
+# Modified keys such as Shift-Enter reach the agent (pi warns without them). -q: an
+# older tmux without these options still reads the rest.
+set -gq extended-keys on
+set -gq extended-keys-format csi-u
 # Two devices attached at different sizes: the one used last decides.
 set -g window-size latest
 # A session is its agent: it ends when the agent exits, and the server with the last.
