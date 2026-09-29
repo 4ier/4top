@@ -113,3 +113,14 @@ def test_fitting_the_layout_leaves_a_zoomed_list_zoomed(layout):
     assert zoomed() == "1"
     workspace.zoom_panel(False)
     assert zoomed() == "0"
+
+
+def test_the_list_is_fitted_to_the_window_not_to_its_own_width(layout):
+    # A rotation shrinks the list with the window; judged by its own width it looked
+    # narrow and stayed 25 columns wide on a 113-column screen.
+    workspace, tmux, env = layout
+    subprocess.run([*tmux, "resize-pane", "-t", workspace.panel, "-x", "25"], env=env)
+    workspace.fit(25)
+    width = subprocess.run([*tmux, "display", "-p", "-t", workspace.panel, "#{pane_width}"],
+                           capture_output=True, text=True, env=env).stdout.strip()
+    assert int(width) == min(60, 160 * 2 // 5)
