@@ -62,6 +62,13 @@ def control_dir(config: Config) -> str | None:
 def ssh_argv(config: Config, host: Host, args: list[str], *, tty: bool = False) -> list[str]:
     """Build one local argv. ssh hands the last element to a remote shell, so every
     remote argument is quoted for that shell rather than trusted as a literal."""
+    remote = " ".join(shlex.quote(value) for value in (host.command, *args))
+    return [*ssh_command(config, host, tty=tty), host.ssh, remote]
+
+
+def ssh_command(config: Config, host: Host, *, tty: bool = False) -> list[str]:
+    """ssh and its options for this host, without the destination: also what rsync
+    is given as its remote shell."""
     options = [*SSH_OPTIONS, "-o", f"ConnectTimeout={max(1, int(host.timeout_seconds))}"]
     if host.e2b:
         # Every sandbox is a new host name with the template's host key, and the
@@ -75,8 +82,7 @@ def ssh_argv(config: Config, host: Host, args: list[str], *, tty: bool = False) 
         options += ["-o", "ControlMaster=no", "-o", "ControlPath=none", "-t"]
     elif directory:
         options = [*options, *SSH_MULTIPLEX, "-o", f"ControlPath={directory}/%C"]
-    remote = " ".join(shlex.quote(value) for value in (host.command, *args))
-    return ["ssh", *options, host.ssh, remote]
+    return ["ssh", *options]
 
 
 def run_remote(config: Config, host: Host, args: list[str]) -> tuple[int, str, str]:

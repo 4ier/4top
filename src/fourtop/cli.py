@@ -25,6 +25,18 @@ COMMANDS = (
     ("new", "Start an original agent in this terminal"),
     ("resume", "Resume one exact session as a new process"),
     ("doctor", "Read dependency and source diagnostics"),
+    ("cloud", "Sessions on machines of their own (E2B sandboxes)"),
+)
+CLOUD = (
+    ("new", "Start an agent on a fresh machine with this project's current work"),
+    ("fork", "Copy a sandbox, running agent included, as it is this instant"),
+    ("race", "Give one prompt to several agents, each on its own machine"),
+    ("take", "Bring a sandbox's work here as branch 4top/NAME"),
+    ("rewind", "List a sandbox's checkpointed turns, or start a sandbox from one"),
+    ("up", "Carry a local session to the cloud and resume it there"),
+    ("home", "Bring a cloud session back here and resume it"),
+    ("ls", "List cloud sandboxes"),
+    ("rm", "Remove cloud sandboxes and their checkpoints"),
 )
 
 
@@ -78,6 +90,34 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("key", help="Stable key / unique native ID prefix; never a row number")
             sub.add_argument("--cwd", help="Explicit override for a historical working directory")
             sub.add_argument("--yes", action="store_true", help="Explicitly confirm this exact operation")
+        if command == "cloud":
+            verbs = sub.add_subparsers(dest="verb", required=True)
+            for verb, verb_text in CLOUD:
+                cloud = verbs.add_parser(verb, help=verb_text)
+                _globals(cloud, suppress=True)
+                if verb in ("new", "up"):
+                    cloud.add_argument("--name", help="Section name (default: the project's)")
+                if verb == "new":
+                    cloud.add_argument("agent", choices=("codex", "claude", "pi"))
+                if verb in ("new", "race", "take"):
+                    cloud.add_argument("--cwd", default=os.getcwd())
+                if verb in ("fork", "take", "rewind", "home"):
+                    cloud.add_argument("name", help="A cloud sandbox, as `4top cloud ls` names it")
+                if verb == "fork":
+                    cloud.add_argument("-n", "--count", type=int, default=2)
+                if verb == "race":
+                    cloud.add_argument("prompt")
+                    cloud.add_argument("--agents", default="claude,codex",
+                                       help="Comma-separated; an agent may repeat")
+                if verb == "rewind":
+                    cloud.add_argument("turn", nargs="?", type=int,
+                                       help="Start a sandbox from the checkpoint after this turn")
+                if verb == "up":
+                    cloud.add_argument("key", help="A local session: stable key or native ID prefix")
+                if verb == "ls":
+                    cloud.add_argument("--json", action="store_true")
+                if verb == "rm":
+                    cloud.add_argument("names", nargs="+")
     return ap
 
 
@@ -162,6 +202,77 @@ def _exec(argv: list[str]) -> int:
     raise AssertionError("exec failed to replace this process")
 
 
+def _cloud(config: Config, args, extra: tuple[str, ...]) -> int:
+    from . import cloud
+    if args.verb == "new":
+        host, where = cloud.new(config, args.cwd, args.name)
+        cloud.say(f"{host.name} is ready; `4top` lists it, `4top cloud rm {host.name}` removes it")
+        cwd = os.path.abspath(args.cwd)
+        remote = ["new", args.agent, "--cwd", cwd, "--yes"] + (["--", *extra] if extra else [])
+        return _exec(Manager(config, host).remote_argv(remote))
+    if args.verb == "fork":
+        for host in cloud.fork(config, args.name, max(1, args.count)):
+            cloud.say(f"{host.name} is a copy of {args.name}; Enter on it in `4top` attaches")
+        return 0
+    if args.verb == "race":
+        agents = [agent.strip() for agent in args.agents.split(",") if agent.strip()]
+        if not agents or set(agents) - {"claude", "codex", "pi"}:
+            raise FourtopError("--agents takes claude, codex or pi, comma-separated", 2)
+        for host in cloud.race(config, args.cwd, args.prompt, agents):
+            cloud.say(f"{host.name} is on it")
+        cloud.say("watch them in `4top`; `4top cloud take NAME` brings the winner's work here")
+        return 0
+    if args.verb == "take":
+        branch = cloud.take(config, args.name, args.cwd)
+        cloud.say(f"the work of {args.name} is branch {branch}")
+        return 0
+    if args.verb == "rewind":
+        if args.turn is None:
+            _, _, turns = cloud.checkpoint_log(config, args.name)
+            for number, (at, _, prompt) in enumerate(turns, 1):
+                print(f"{number:>3}  {at}  {_clip(prompt, 80)}")
+            if not turns:
+                cloud.say(f"{args.name} has no checkpointed turns yet")
+            return 0
+        host = cloud.rewind(config, args.name, args.turn)
+        cloud.say(f"{host.name} is {args.name} right after turn {args.turn}")
+        # The checkpoint holds the machine's memory: the agent is already running.
+        return _exec(cloud.agent_argv(config, host, None))
+    if args.verb == "up":
+        record = Manager(config).resolve_history(args.key)
+        host, native = cloud.up(config, record, args.name)
+        cloud.say(f"{record.agent} session {native[:8]} now runs on {host.name}; "
+                  f"`4top cloud home {host.name}` brings it back")
+        return _exec(Manager(config, host).remote_argv(["resume", native, "--yes"]))
+    if args.verb == "home":
+        path, branch = cloud.home(config, args.name)
+        if branch:
+            cloud.say(f"{path} changed since it left, so its work is branch {branch}")
+        else:
+            cloud.say(f"{path} now holds the work of {args.name}")
+        cloud.say(f"its transcripts are here; `4top` resumes it, `4top cloud rm {args.name}` "
+                  f"removes the sandbox")
+        return 0
+    if args.verb == "ls":
+        found = cloud.discover(config)
+        for host, item in found:
+            metadata = item.get("metadata") or {}
+            if args.json:
+                print(json.dumps({"name": host.name, "sandbox": host.e2b, "state": item.get("state"),
+                                  "path": metadata.get("fourtop_path"),
+                                  "started": item.get("startedAt")}, ensure_ascii=False))
+            else:
+                print(f"{_clip(host.name, 24)}  {_clip(str(item.get('state')), 8)}  {host.e2b}  "
+                      f"{metadata.get('fourtop_path', '')}")
+        return 0
+    if args.verb == "rm":
+        for name in args.names:
+            cloud.remove(config, name)
+            cloud.say(f"removed {name}")
+        return 0
+    raise FourtopError("Unknown cloud operation", 2)
+
+
 def execute(args, extra: tuple[str, ...] = ()) -> int:
     if args.demo:
         if args.command not in (None, "list", "search", "preview"):
@@ -238,6 +349,8 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                 remote = ["new", args.agent, "--cwd", args.cwd] + (["--", *extra] if extra else [])
                 return _exec(manager.remote_argv(remote))
             return _hand_over(manager, manager.new(args.agent, args.cwd, extra))
+        if command == "cloud":
+            return _cloud(manager.config, args, extra)
         if command == "resume":
             local = not manager.remote
             target = manager.resolve_history(args.key) if local else None

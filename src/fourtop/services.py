@@ -287,6 +287,10 @@ class Manager:
         if self.host is None:
             raise Missing("This is the local view; no remote command applies")
         self.wake()
+        if self.host.e2b:
+            # In a sandbox the agent lives in the sandbox's own tmux; this attaches.
+            from .cloud import agent_argv
+            return agent_argv(self.config, self.host, args)
         return ssh_argv(self.config, self.host, args, tty=True)
 
     def run(self, plan: LaunchPlan) -> int:

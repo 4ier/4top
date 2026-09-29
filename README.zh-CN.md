@@ -111,25 +111,44 @@ ssh = "me@build-box"                 # 任意 ssh 目标，包括 tailnet 名称
 （ControlMaster）让刷新保持廉价，BatchMode 让缺少密钥时快速失败而不是卡在提示上，
 行 schema 不一致的远端会被拒绝而不是部分解析。
 
-### E2B 沙箱
+## 云端会话（E2B）
 
-[E2B](https://e2b.dev) 沙箱是一台用完即弃的云端机器，空闲时会暂停，暂停期间进程也保留。
-4top 像访问其他主机一样通过 ssh 连它，经由沙箱的 websocket 端口，所以本机需要 `websocat`
-（`brew install websocat`，Termux 里 `pkg install websocat`）。
+在云端，每个会话有一台自己的机器：[E2B](https://e2b.dev) 沙箱，可以连同内存一起存档。
+所以云端的会话可以复制、倒回、暂存、带回家，文件、依赖和正在运行的 agent 都跟着走。
 
 ```sh
-contrib/e2b/new scratch        # 用 4top 模板新建一个沙箱，并打印配置条目
+4top cloud new claude              # 本项目开一台新机器，依赖已装好
+4top cloud fork NAME -n 3          # 复制三份，连正在运行的 agent，就是此刻的样子
+4top cloud race "fix the flaky test" --agents claude,codex   # 每个 agent 一台机器
+4top cloud take NAME               # 把那台机器的成果变成本地分支 4top/NAME
+4top cloud rewind NAME             # 列出每一轮；`rewind NAME 2` 是第 2 轮刚结束时的机器
+4top cloud up KEY                  # 把本地会话带上云，在那里接着跑
+4top cloud home NAME               # 带回来：成果、transcript，在本机接着 resume
+4top cloud ls
+4top cloud rm NAME
 ```
+
+项目在沙箱里放在同一个绝对路径，所以 transcript 两边含义一致。文件按 git 的口径传输：
+已跟踪和未跟踪的文件以及 git 目录，git 忽略的永远不碰。每个项目第一次 `new` 会构建一个
+装好依赖的存档点（`uv.lock`、`package-lock.json` 等，存在 `.4top/setup.sh` 时再执行它），
+之后几秒就能开出新机器。agent 每结束一轮就给机器存一个档，`rewind` 回到的就是它。
+
+每个沙箱在面板里是一个分组，无需配置自动出现。agent 跑在沙箱自己的 tmux 里：合上笔记本
+它照样干活，断线自动重连，分叉会带着正在运行的 agent。agent 在写东西时沙箱保持运行；停下
+十分钟后连同进程一起暂停，面板显示 `paused` 且不会唤醒它，按 Enter 约一秒唤醒。
+
+本机需要 `websocat`（`brew install websocat`、`pkg install websocat`）、E2B key
+（`E2B_API_KEY` 或 `e2b auth login`），以及用 [contrib/e2b](contrib/e2b) 构建一次的 `4top`
+模板。沙箱用本机自己的凭证登录：ssh 公钥、`claude setup-token` 得到的 Claude token
+（`CLAUDE_CODE_OAUTH_TOKEN` 或 `~/.config/claude-code/oauth-token`）、Codex 的 `auth.json`
+和 `[agents]` 条目。也可以把某个沙箱固定成主机：
 
 ```toml
 [hosts.scratch]
 e2b = "SANDBOX_ID"
 ```
 
-暂停的沙箱显示上次的会话并标为 `paused`，刷新永远不会唤醒它；Enter、预览或搜索会唤醒它（约一秒）。
-只要它的某个 agent 还在面板里开着，面板就会让它保持运行；最后一个关闭十分钟后，它会再次暂停。
-API key 取自 `E2B_API_KEY`，或 `e2b auth login` 选定的项目。模板和设计见
-[contrib/e2b](contrib/e2b) 和 [docs/e2b-design.md](docs/e2b-design.md)。
+设计与实测数据见 [docs/e2b-design.md](docs/e2b-design.md)。
 
 ## 命令行
 

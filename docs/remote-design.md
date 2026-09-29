@@ -132,5 +132,6 @@ because a non-interactive ssh shell does not read login profiles.
 ## Out of scope
 
 A daemon or port binding, discovery, a web interface, credentials stored in
-configuration, multi-user hosts, session migration between machines, and push
+configuration, multi-user hosts, session migration between ssh machines (the cloud
+does it; see [e2b-design.md](e2b-design.md)), and push
 updates — polling over ssh is the ceiling.

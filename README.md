@@ -160,27 +160,50 @@ of failing during the hand-over, where the message would be painted over. The ss
 connection also keeps a liveness probe, so a link that dies becomes an error rather
 than a hang, and the session stays in its transcript to be resumed again.
 
-### E2B sandboxes
+## Cloud sessions (E2B)
 
-An [E2B](https://e2b.dev) sandbox is a throwaway cloud machine that pauses when idle
-and keeps its processes while paused. 4top reaches it over ssh like any host, through
-the sandbox's websocket port, so this machine needs `websocat`
-(`brew install websocat`, or `pkg install websocat` in Termux).
+In the cloud a session gets a machine of its own: an [E2B](https://e2b.dev) sandbox,
+which can be checkpointed with its memory. So a session there can be copied, wound
+back, parked and carried home, with its files, dependencies and running agent.
 
 ```sh
-contrib/e2b/new scratch        # create one from the 4top template; prints the entry
+4top cloud new claude              # this project on a fresh machine, dependencies installed
+4top cloud fork NAME -n 3          # three copies of it, running agent included, as it is now
+4top cloud race "fix the flaky test" --agents claude,codex   # one machine per agent
+4top cloud take NAME               # that machine's work as local branch 4top/NAME
+4top cloud rewind NAME             # its turns; `rewind NAME 2` is the machine right after turn 2
+4top cloud up KEY                  # carry a local session up and resume it there
+4top cloud home NAME               # bring it back: work, transcript, resume here
+4top cloud ls
+4top cloud rm NAME
 ```
+
+The project sits at the same absolute path in the sandbox, so a transcript means the
+same thing on both sides. Files travel by git's account: tracked and untracked files
+and the git directory, never what git ignores. The first `new` for a project builds a
+checkpoint with its dependencies installed (`uv.lock`, `package-lock.json`, …, then
+`.4top/setup.sh` if present); later ones start from it in seconds. Every agent turn
+checkpoints the machine, which is what `rewind` returns to.
+
+Each sandbox is a section of the panel, found without configuration. Its agent runs
+in the sandbox's own tmux: closing the laptop does not stop it, a dropped link
+reattaches, and a fork carries the running agent. While an agent writes, the sandbox
+stays up; ten minutes after it stops, it pauses with its processes, and the panel
+shows it `paused` without waking it. Enter wakes it in about a second.
+
+It needs `websocat` here (`brew install websocat`, `pkg install websocat`), an E2B key
+(`E2B_API_KEY`, or `e2b auth login`) and the `4top` template, built once from
+[contrib/e2b](contrib/e2b). The sandbox is signed in with this machine's own
+credentials: the ssh key, the Claude token from `claude setup-token`
+(`CLAUDE_CODE_OAUTH_TOKEN` or `~/.config/claude-code/oauth-token`), Codex's
+`auth.json` and the `[agents]` entries. A sandbox can also be pinned as a host:
 
 ```toml
 [hosts.scratch]
 e2b = "SANDBOX_ID"
 ```
 
-A paused sandbox shows its last rows marked `paused`, and refreshing never wakes it.
-Enter, preview or search wakes it (about a second). While one of its agents is open,
-the panel keeps it awake; ten minutes after the last one closes, it pauses again.
-The API key is `E2B_API_KEY`, or the project `e2b auth login` selected. The template
-and the design are in [contrib/e2b](contrib/e2b) and [docs/e2b-design.md](docs/e2b-design.md).
+Design and measurements: [docs/e2b-design.md](docs/e2b-design.md).
 
 ## Command line
 

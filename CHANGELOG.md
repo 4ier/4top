@@ -2,13 +2,16 @@
 
 ## Unreleased
 
-- E2B sandboxes as hosts: `[hosts.NAME] e2b = "SANDBOX_ID"` reaches a sandbox over
-  ssh through its websocket (`websocat` as ProxyCommand), so listing, preview,
-  preflight, resume and the tmux layout work unchanged. Refreshing never wakes a
-  paused sandbox (it shows its last rows as `paused`); an action wakes it, and an
-  open agent keeps it awake. `contrib/e2b` holds the template and `new`, which
-  creates a tagged, auto-pausing sandbox signed in with this machine's credentials.
-  Verified against a real sandbox: new Claude session, pause, resume by key.
+- Cloud sessions on E2B: `4top cloud new | fork | race | take | rewind | up | home |
+  ls | rm`. A cloud session owns a machine that can be checkpointed with its
+  memory, so it can be copied with its running agent, wound back to any turn,
+  raced across agents, and carried up from this machine and back home. The project
+  sits at its local path; files travel by git's account (tar over ssh, never what
+  git ignores); the agent lives in the sandbox's tmux; the sandbox stays up while
+  an agent writes and pauses ten minutes after. Sandboxes appear in the panel as
+  sections by themselves; a paused one is never woken by refreshing.
+  `[hosts.NAME] e2b = "SANDBOX_ID"` pins one as a host. Every verb was run against
+  real sandboxes; see docs/e2b-design.md.
 
 - One tap on a touch screen still opened a session: Textual runs OptionList's own
   click handler after an override unless the default is prevented. It is now, and a

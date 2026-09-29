@@ -27,7 +27,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, Select, Static
 from textual.widgets.option_list import Option
 
-from .errors import FourtopError
+from .errors import Dependency, FourtopError
 from .models import Session, Snapshot, age
 from .workspace import Workspace
 
@@ -355,6 +355,9 @@ class SessionList(OptionList):
         self.action_cursor_up()
 
 
+CLOUD_REFRESH = 15.0  # seconds between asking E2B which sandboxes exist
+
+
 @dataclass
 class Source:
     """One machine's section of the list."""
@@ -490,7 +493,35 @@ class FourtopApp(App[tuple | None]):
             self.run_worker(self.refresh_history())
         if not self.manager.demo and getattr(self.manager.config, "update_check", False):
             self.run_worker(self._check_update())
+        if local is not None and getattr(self.manager.config, "environment", None) is not None:
+            self.set_interval(CLOUD_REFRESH, self.discover_sandboxes)
+            self.run_worker(self.discover_sandboxes())
         await self.refresh_rows()
+
+    async def discover_sandboxes(self):
+        """Cloud sandboxes appear as sections of their own and leave when removed, so
+        a fork or a race shows up here without touching the configuration."""
+        from . import cloud
+        from .services import Manager
+        config = self.manager.config
+        try:
+            found = await asyncio.to_thread(cloud.discover, config)
+        except Dependency:
+            return  # no E2B key: no cloud
+        except FourtopError as exc:
+            self.set_status(str(exc))
+            return
+        names = {source.name for source in self.sources}
+        for host, _ in found:
+            if host.name not in names:
+                manager = Manager(config, host)
+                manager.discovered = True
+                self.sources.append(Source(manager))
+        present = {host.name for host, _ in found}
+        self.sources = [source for source in self.sources
+                        if not getattr(source.manager, "discovered", False) or source.name in present]
+        self._signature = None
+        self.render_list()
 
     async def _check_update(self):
         from .update import check

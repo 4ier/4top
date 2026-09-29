@@ -1,137 +1,151 @@
-# E2B sandboxes as hosts
+# E2B sandboxes: sessions that own a machine
 
-Status: phase 1 is implemented (`fourtop.e2b`, `contrib/e2b`); phases 2 and 3 are
-proposals.
+Status: implemented on `feat/e2b-sandbox` (`fourtop.cloud`, `fourtop.e2b`); every
+command below was run against real sandboxes on 2026-09-29.
 
-## The idea in one line
+## The idea
 
-An [E2B](https://e2b.dev) sandbox is a disposable Linux machine that can pause with
-its memory intact. 4top already knows how to use another machine: run the same CLI
-over ssh. So a sandbox becomes **one more host**, reached over ssh, and E2B only adds
-what ssh cannot do: create, pause, wake, fork and throw away the machine.
+A native session is a transcript, and 4top's premise is that the transcript is the
+durable part while the process is disposable. An [E2B](https://e2b.dev) sandbox
+moves that line: the **whole machine** becomes durable too. It can be copied,
+wound back, parked and carried, with its files, installed dependencies and running
+processes. So in the cloud a session is *transcript + its own machine*, and 4top
+gets verbs that no ssh host can offer.
 
-The transport and every contract in [remote-design.md](remote-design.md) stay as they
-are: `list --json --sync`, `check`, `preview`, cached rows, opaque keys, `ssh -t` for
-agents, the tmux layout. No daemon, no new protocol.
+All of them are one primitive, the **checkpoint** (an E2B snapshot of a running
+sandbox, memory included):
 
-## What it gives
-
-| Pain today | With a sandbox |
+| Verb | Is |
 | --- | --- |
-| yolo agents run on a real machine; two agents in one directory share it | each task gets its own machine; yolo is harmless there |
-| closing the laptop ends local agents | the sandbox keeps running, and pauses itself when idle |
-| a resumed session is a new process; shells, servers and memory are gone | pause keeps the **process** too; waking takes about a second |
-| trying two approaches means doing it twice by hand | snapshot once, fork N sandboxes from it |
-| the tablet reaches a dev server only over the tailnet | every port has a public URL, `https://PORT-ID.e2b.app` |
+| instant project machine | a checkpoint of the project with dependencies installed; each new task starts from it |
+| fork, race | N sandboxes from one checkpoint |
+| rewind | one sandbox from an earlier checkpoint, taken after every agent turn |
+| to the cloud, back home | a sandbox from the project checkpoint, plus this machine's work and transcript; and the reverse |
 
-## Facts measured on 2026-09-28 (e2b CLI 2.18.0)
+## Measured on 2026-09-28/29
 
-- `e2b sbx exec ID -- cmd` runs a command, keeps stdout and stderr apart and returns
-  the exit code. About 3.4 s per call from here: too slow for a 15 s poll on its own.
-- `exec` **wakes a paused sandbox**; a file written before `pause` was read back.
-  `pause` took 3.3 s for a 512 MB sandbox.
-- `exec` has no terminal, and `connect` opens a shell but takes no command, so neither
-  can start an interactive agent.
-- Paused sandboxes are kept until killed. Continuous runtime is capped (24 h Pro,
-  1 h Hobby); a pause resets the clock. `--lifecycle.ontimeout pause
-  --lifecycle.autoresume` makes idleness pause and traffic wake.
-- The timeout counts from creation or the last resume; traffic does not extend it.
-  An agent working in a sandbox would pause under itself, so the panel extends it
-  while one of its agents is open (`POST /v2/sandboxes/ID/connect`, which wakes a
-  paused sandbox and otherwise only ever extends the deadline).
-- Over ssh with connection reuse, a call costs about 0.4 s after the first (5 s).
-- A team's API key sees **every** sandbox of the team, including production ones that
-  are not ours. 4top must only ever look at, pause or kill sandboxes it tagged.
+| | |
+| --- | --- |
+| checkpoint of a running sandbox | 2.4 s |
+| new sandbox from a checkpoint | 1.6 s |
+| `fork` of a running sandbox into two | 1.3 s; running processes carried on in both, files then diverged, transcripts came along |
+| wake a paused sandbox | about 1 s |
+| ssh call over the websocket, connection reused | 0.4 s (first 5 s) |
+| `cloud new`, project checkpoint ready | about 10 s to a running agent; building the checkpoint once, about 70 s for this repository |
+| `cloud fork NAME -n 2` | 15 s; the running Claude carried on in both |
+| `cloud race` with two agents | 36 s until both were working |
+| `cloud up KEY` / `cloud home NAME` | 40 s / 14 s, transcript and files both ways |
 
-## Transport: ssh through the sandbox's websocket port
+- A sandbox's timeout counts from creation or resume; traffic does not extend it.
+- A paused sandbox wakes on traffic, so it must never be polled.
+- Forks inherit metadata and there is no call to change it, so forks are made as
+  *checkpoint, then create with metadata*, which also names them.
+- Inside, `/run/e2b/.E2B_SANDBOX_ID` names the sandbox, forks included.
+- A snapshot freezes the machine for a moment and may reset its connections, so an
+  attached client reattaches (ssh exits 255 only when the link is lost), and the
+  checkpoint hook logs its turn before asking for the snapshot and never waits for
+  the answer: a copy made from that instant must not wait on a dead connection.
+- E2B refuses to delete a checkpoint while a sandbox made from it runs; the last
+  copy's `rm` deletes it.
+- Files can be written over HTTP (envd, port 49983) with the `envdAccessToken` of a
+  `secure` sandbox, which is how the first ssh key gets in without the node CLI.
+- An API key sees every sandbox of its project; 4top touches only those tagged
+  `fourtop=1`.
 
-E2B documents ssh access: the template runs `sshd` plus
-`websocat -b --exit-on-eof ws-l:0.0.0.0:8081 tcp:127.0.0.1:22`, and the client
-connects with
+## Model
 
-```sh
-ssh -o 'ProxyCommand=websocat --binary -B 65536 - wss://8081-%h.e2b.app' user@SANDBOX_ID
-```
+- **A cloud session lives at the same path as at home.** The project is placed at its
+  local absolute path, so Claude's per-directory transcript folder and every `cwd`
+  in a transcript mean the same thing on both sides. Moving a session is then a file
+  copy, not a rewrite.
+- **Sandboxes are found, not configured.** Every sandbox tagged `fourtop=1` becomes a
+  section named by its `fourtop_name`; one listing call per refresh gives every
+  sandbox's state, so paused ones are shown from cache and never woken.
+- **Transport is ssh** through the sandbox's websocket, as for `[hosts] e2b`.
+- **Files travel by git's account**, as tar over ssh: tracked and untracked files and
+  the git directory; what git ignores is never sent, overwritten or deleted. A
+  worktree's repository goes to its own absolute path, so the worktree's pointer
+  holds. rsync's `.gitignore` filter came first, and macOS's openrsync ignores it:
+  `--delete` removed ignored files, a local `.venv` among them.
+- **The agent lives in the sandbox's tmux** (session `agent`, no prefix, no status
+  line); this machine only attaches. A fork or a rewind carries the running agent,
+  and the agent keeps working with nobody attached.
+- **The sandbox keeps itself up** while an agent writes a transcript, and pauses
+  ten minutes after the last write: a timeout counted from resume would otherwise
+  pause an agent mid-turn.
+- **The user's credentials go in once**, into the project checkpoint: ssh key,
+  `CLAUDE_CODE_OAUTH_TOKEN`, Codex's `auth.json`, the `[agents]` entries.
 
-This is chosen over the SDK's terminal API because it changes nothing downstream:
-`ControlMaster` removes the 3.4 s per call after the first, `ssh -t` gives agents a
-real terminal, and tests for ssh hosts cover sandboxes too. The cost is `websocat` on
-each client (Homebrew and Termux both package it) and a template with `sshd`.
-
-The only change to `hosts.ssh_argv` is two options for a sandbox host: the
-ProxyCommand, and `StrictHostKeyChecking=accept-new`, because every sandbox is a new
-host name and `BatchMode` refuses the prompt. The sandbox ID is the ssh destination.
-
-## Waking is the one new rule
-
-Traffic wakes a paused sandbox, so polling it every 15 s would keep it awake, and
-billed, forever. Before a refresh tick the panel makes one API call for all tagged
-sandboxes (`e2b sbx list -s running,paused -m fourtop=1 -f json`, or the same REST
-call without the node CLI) and polls only running ones. A paused sandbox shows its
-cached rows with the state `paused`, like `cached` or `unreachable` today. Enter,
-preview, check, full search and doctor wake it, because the user asked; a metadata
-search reads the cached rows. While one of its agents is open in the tmux layout,
-the panel extends the sandbox once a minute; when the last closes, it pauses ten
-minutes later, with its processes.
-
-## Configuration
-
-```toml
-[hosts.scratch]
-e2b = "SANDBOX_ID"
-```
-
-The API key is `E2B_API_KEY`, else `projectApiKey` from `~/.e2b/config.json`, which
-`e2b auth login` writes for the selected project. No other option was needed.
-
-Phase 2 finds the sandboxes 4top created through their `fourtop=1` metadata and gives
-each a section named by its `fourtop_name`, so creating one never edits the file.
-
-## Template (`contrib/e2b/`)
-
-`e2bdev/base` plus `openssh-server`, `websocat`, `tmux`, `git`, Claude Code, Codex and
-4top itself, so the remote side of the contract is present. Build it with
+## Commands
 
 ```sh
-cd contrib/e2b && e2b template create 4top -d Dockerfile \
-    -c /usr/local/bin/4top-sandbox-start --ready-cmd 'bash -c "</dev/tcp/127.0.0.1/8081"' \
-    --memory-mb 2048
+4top cloud new claude              # this project, on a fresh machine, in seconds
+4top cloud fork NAME -n 3          # three copies of that machine and session, as they are now
+4top cloud race "fix the flaky test" --agents claude,codex
+4top cloud take NAME               # that sandbox's work as local branch 4top/NAME
+4top cloud rewind NAME             # its checkpoints; with a turn, a new sandbox from it
+4top cloud up KEY                  # carry a local session to the cloud and resume it there
+4top cloud home NAME               # bring it back: work, transcript, resume here
+4top cloud ls
+4top cloud rm NAME
 ```
 
-The start command runs once, at build time, and the sandbox resumes from that
-snapshot, so it cannot see anything given at creation. `contrib/e2b/new` therefore
-writes the per-user files afterwards with `e2b sandbox exec`: this machine's public
-key, `CLAUDE_CODE_OAUTH_TOKEN` into `~/.ssh/environment` (the template sets
-`PermitUserEnvironment`), `~/.codex/auth.json`, and the `[agents]` entries of this
-machine's 4top configuration, so a permission mode carries over.
+### 1. Instant project machine (`new`)
 
-The builder's PyPI view lagged a release by hours, so the template takes whatever
-4top it sees; the remote side only needs the read-only commands.
+The project checkpoint is named after the project and a hash of its dependency
+files (`uv.lock`, `package-lock.json`, `pnpm-lock.yaml`, `requirements.txt`, …), so it
+is rebuilt only when dependencies change. Building it: sandbox from the `4top`
+template, credentials in, the working tree synced to the same path, the detected
+install run, checkpoint, builder killed. `new` then creates from the checkpoint,
+syncs the current working tree (by git's account, so the installed dependencies
+stay) and starts the agent.
+Each task is a clean machine: yolo is harmless there, and parallel agents never
+share a directory.
 
-## Phases
+### 2. Fork and race
 
-**1. A sandbox is a host (done).** `[hosts.NAME] e2b = ID`, the ProxyCommand, the
-paused rule, keeping an open agent's sandbox awake, `doctor` reporting a missing
-`websocat`. Verified on the Mac against a real sandbox: `new claude` did work there,
-the sandbox was paused, `resume KEY` woke it and the conversation continued; the
-panel showed it `paused` and did not wake it. Still to verify: the tablet.
+`fork` checkpoints a sandbox and creates N from it, named `NAME-1` … `NAME-N`. The
+agent that was running continues in each, from the same instant. Verified: two
+forks of a session diverged (`three` in one, `THREE` in the other), and `take` of
+the second arrived as a local branch.
 
-**2. Create and dispose from the panel.** A new `sandbox new` subcommand (repo URL and name as options)
-creates from the template with the tags and auto-pause, clones the repo, and the
-section appears. `n` on a sandbox section starts an agent there as today. Keys on a
-sandbox section: pause and kill (kill is the one action that asks, because it is not
-reversible).
+`race` syncs the project once, checkpoints, and starts one sandbox per agent, each
+agent started on the prompt in the sandbox's tmux, interactive, so the winner can
+simply be attached and continued. Verified with Claude and Codex. The panel shows them side by side; `take`
+brings the chosen one's work home as branch `4top/NAME` (commit in the sandbox, git
+bundle over ssh, fetch here), and `rm` removes the others.
 
-**3. Beyond a machine.**
-- *Move a session to the cloud*: copy the transcript and a `git bundle` of its
-  repository to the same path in a new sandbox, then resume it there. The exact
-  native resume already works from a transcript alone, which is the premise of 4top.
-- *Fork*: `e2b sbx snapshot create` on a sandbox, then N sandboxes from the snapshot,
-  each with its own agent and the same history: best-of-N without shared files.
-- *Ports*: the details view lists listening ports as `https://PORT-ID.e2b.app`
-  links, so the tablet opens what the agent is serving.
+### 3. Rewind
+
+After every agent turn the sandbox checkpoints itself (a Claude `Stop` hook and a
+Codex `notify` hook call the snapshot API with the sandbox's own ID). `rewind NAME`
+lists them; `rewind NAME TURN` creates a sandbox from that checkpoint, where files,
+dependencies, services and the transcript are as they were right after that turn.
+Claude's own `/rewind` restores files; this restores the machine. Verified: after
+two turns, `rewind demo 1` gave a machine whose file held only the first turn's line
+and whose Claude answered that it had received one message.
+
+### 4. To the cloud and back home
+
+`up KEY` builds or reuses the project checkpoint, syncs the working tree, copies
+the session's transcript to the same place in the sandbox and resumes it there.
+The laptop can close. `home NAME` does the reverse: if the local tree is unchanged
+since `up`, it is synced back; otherwise the work arrives as branch `4top/NAME`. The
+transcript is copied back (a newer copy here wins) and the session resumes here.
+Verified: a local Claude session went up, answered in the sandbox from its local
+memory and wrote a file there; `home` brought the file and the transcript back, and
+the local resume knew it had been running on Linux.
+
+## Trade-offs
+
+- Rewind puts the project's E2B key inside the sandbox, where a yolo agent could use
+  it on the project's other sandboxes. A project used only by 4top avoids that.
+- Checkpoints are kept by E2B until deleted; `rm` deletes a sandbox's checkpoints
+  with it.
+- The template carries sshd, websocat, rsync, tmux, git, uv, Claude Code, Codex and
+  4top; `contrib/e2b/README.md` has the build command.
 
 ## Out of scope
 
-Running agents through the E2B SDK instead of their own CLIs, a hosted 4top, billing
-dashboards, and sandboxes 4top did not tag.
+Running agents through the E2B SDK instead of their own CLIs, a hosted 4top,
+billing, and sandboxes 4top did not tag.
