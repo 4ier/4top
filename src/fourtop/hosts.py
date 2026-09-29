@@ -114,7 +114,8 @@ def parse_payloads(host: Host, stdout: str) -> tuple[list[dict], dict | None]:
             summary = payload["sync"]
             if (not isinstance(summary, dict) or summary.get("version") != SYNC_VERSION
                     or not isinstance(summary.get("count"), int)
-                    or not isinstance(summary.get("digest"), str)):
+                    or not isinstance(summary.get("digest"), str)
+                    or not isinstance(summary.get("resident", []), list)):
                 raise Unavailable(f"{host.name}: unreadable sync summary; nothing was trusted")
             continue
         row_from(host, payload, number)  # validate now; a bad row poisons the whole answer
@@ -135,7 +136,8 @@ def row_from(host: Host, payload: dict, number: int = 0) -> Session:
             subagent=payload.get("subagent") is True,
             activity=str(payload.get("activity") or ""),
             last_request=str(payload.get("last_request") or ""),
-            branch=str(payload.get("branch") or ""))
+            branch=str(payload.get("branch") or ""),
+            resident=payload.get("resident") is True)
     except (KeyError, TypeError, ValueError):
         raise Unavailable(f"{host.name}: row {number} is missing required fields") from None
 
@@ -209,6 +211,13 @@ def remote_snapshot(config: Config, host: Host, sync: SyncState | None = None) -
         sync.supported = True
         merged = dict(sync.payloads) if sync.cursor else {}
         merged.update((str(payload["key"]), payload) for payload in payloads)
+        if "resident" in summary:
+            # An agent that started or exited changed a row the cursor cannot see.
+            running = {str(key) for key in summary["resident"]}
+            merged.update([(key, {**payload, "resident": key in running})
+                           for key, payload in merged.items()
+                           if payload.get("resident", False) != (key in running)])
+        sync.attach = "resident" in summary
         prints = {key: fingerprint(payload) for key, payload in merged.items()}
         if len(merged) == summary["count"] and digest(prints) == summary["digest"]:
             sync.accept(merged, str(summary.get("cursor") or ""))

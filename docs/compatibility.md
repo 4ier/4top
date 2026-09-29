@@ -44,7 +44,9 @@ before submitting another task. 4top adds no permission-bypass flags itself.
 ## Platform evidence
 
 - Root package target: Python >=3.11, macOS/Linux. Core session-ls: Python >=3.9.
-- No multiplexer is required; 4top neither drives nor imports one.
+- No multiplexer is required. With tmux, the panel lays agents out in a tmux server
+  of its own, and a host keeps its agents in another (`4top-agents`) so a dropped
+  link does not end them. Neither touches the user's tmux.
 - **Developer Mac:** macOS 27.0 arm64, Python 3.13.13, Textual 8.2.8. The current
   suite covers history parsing, config and host validation, process launch plans,
   the ssh transport (against a fake `ssh`) and the Textual UI.

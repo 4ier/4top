@@ -19,7 +19,8 @@ anything 4top does remotely is something a person could type.
 ## Contract with a remote host
 
 - Commands used remotely are read-only and already JSON: `list --json`,
-  `search --json`, `preview`, `doctor --json`. Rows keep `schema_version`.
+  `search --json`, `preview`, `doctor --json`. Rows keep `schema_version`. Only
+  `attach`, `resume` and `new` start anything, and they go through `ssh -t`.
 - `ssh -o BatchMode=yes`: never prompt, fail fast, surface the failure as an issue.
   A failed query must never render as an empty machine.
 - **Incremental refresh.** The panel asks `list --json --sync --since CURSOR` and
@@ -102,17 +103,55 @@ The interactive connection carries `ServerAliveInterval`/`ServerAliveCountMax` a
 hang. It deliberately does not reuse the panel's `ControlMaster`: the master is the
 panel's child, and an agent multiplexed over it died when the panel exited (found
 on a tablet, where restarting the panel dropped two remote agents). An agent's own
-connection costs one handshake and outlives the panel. If the link does drop, the remote process may be gone but the
-transcript is not: the panel says so and the session can be resumed again. Keeping an
-agent alive across a drop is the remote machine's own multiplexer, not 4top's.
+connection costs one handshake and outlives the panel.
+
+## Agents stay on their host
+
+Its own connection still made the agent a child of sshd: a dropped link hung the
+session up and took the agent with it, halfway through its work. Confirmed on the
+tablet, where switching from Wi-Fi to cellular, Termux being killed, or a long
+locked screen each did it. So on a host with tmux the agent does not run in the
+ssh session at all.
+
+- `4top attach KEY` runs on the host. It uses a tmux server of its own there
+  (`tmux -L 4top-agents`), never the user's. A session named after the history key
+  is attached if it exists; otherwise the ordinary resume plan (including
+  `[agents.NAME] args`) is started in `new-session -A -s KEY`, which also covers two
+  devices opening it at the same moment. `new --resident` is the same for a new
+  agent; it is named by its preallocated session identifier where the CLI has one,
+  so a later `attach` finds it.
+- That server is usually drawn inside another tmux (the panel), so its configuration
+  keeps out of the way: no status line, prefix `None` so `C-b` reaches the agent or
+  the outer tmux, mouse on, and `window-size latest` so the device used last sets
+  the size. A session ends when its agent exits (`remain-on-exit off`), and the
+  server with the last one.
+- The client's `TERM` comes from the device through `ssh -t`. A host without that
+  terminal's entry would refuse to attach, so `attach` falls back to one it has.
+- A server that is already running was started with an earlier connection's
+  environment; whatever the plan needs differently is passed to the new agent.
+- **Which sessions have an agent is asked of tmux, never recorded.** `list --json`
+  rows carry `resident`, from one `list-sessions` call. Rows change only when an
+  agent starts or exits, not every second, but the cursor cannot see such a change
+  because no transcript was written. So the sync trailer lists the resident keys,
+  and the client applies that list to every row before comparing digests: an
+  agent starting or exiting costs no full listing.
+- **Older hosts keep working.** The trailer's list is also how the panel knows a
+  host has `attach`. A host without it gets `resume --yes`, as before, so a new
+  panel never sends an older host a command it does not have. A host with `attach`
+  but without tmux runs the agent in the ssh session, as before.
+- The panel reports an ssh exit of 255 from a host that keeps agents as
+  "Disconnected": the agent is still there, and Enter attaches again. `Q` closes
+  what this panel has open; a kept agent only loses the view.
+
+What this is not: no supervisor and no restart. An agent that exits or crashes is
+gone, as before, and its transcript is where it can be resumed from.
 
 ## Actions
 
-`resume` and `new` with `--host` hand the terminal to `ssh -t`, so the process is
-created on the machine that owns the history and the remote CLI does the work. The
-local side only quotes the arguments, hands over the terminal and reports what the
-remote said. Persistence across a disconnect is the remote user's own multiplexer,
-not 4top's business.
+`resume`, `attach` and `new` with `--host` hand the terminal to `ssh -t`, so the
+process is created on the machine that owns the history and the remote CLI does the
+work. The local side only quotes the arguments, hands over the terminal and reports
+what the remote said.
 
 ## Deploying the remote side
 

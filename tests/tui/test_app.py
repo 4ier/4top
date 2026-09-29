@@ -603,3 +603,79 @@ async def test_reading_screens_take_the_whole_window_in_the_layout():
         assert workspace.calls[-1] == ("zoom", False)
         await pilot.press("Q")
         await pilot.pause()
+
+
+@pytest.mark.asyncio
+async def test_a_host_that_keeps_agents_is_attached_and_an_older_one_resumed(tmp_path):
+    class Remote(LocalDemo):
+        remote = True
+        keeps_agents = True
+
+        def check(self, query):
+            return {"key": query, "resumable": True, "cwd_missing": False}
+
+        def remote_argv(self, args):
+            return ["ssh", "venus", *args]
+
+    for keeps, verb in ((True, ("attach",)), (False, ("resume",))):
+        manager = Remote()
+        manager.keeps_agents = keeps
+        workspace = FakeWorkspace()
+        app = FourtopApp(manager, workspace=workspace)
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause(.3)
+            key = app.current().key
+            await pilot.press("enter")
+            await pilot.pause(.3)
+            opened = [call for call in workspace.calls if call[0] == "open"]
+            assert opened and opened[0][2][:4] == ("ssh", "venus", *verb, key)
+            await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_an_agent_running_on_its_host_is_marked_and_never_called_stopped(tmp_path):
+    from datetime import datetime, timedelta, timezone
+
+    from fourtop.app import state
+
+    hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    manager = LocalDemo()
+    manager.rows[0] = replace(manager.rows[0], activity="working", last=hour_ago)
+    assert state(manager.rows[0]) == "✗ stopped", "silent for an hour, as far as the file says"
+    manager.rows[0] = replace(manager.rows[0], resident=True)
+    assert state(manager.rows[0]) == "⟳ working", "its host says it runs: a long tool call"
+    assert state(replace(manager.rows[0], activity="", last=week_ago)) == "running"
+    app = FourtopApp(manager)
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(.3)
+        prompt = app.query_one(OptionList).get_option(f"local:{manager.rows[0].key}").prompt.plain
+        assert prompt.startswith("○ ")
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_local_agent_kept_on_this_host_is_attached_not_started_again(tmp_path):
+    calls = []
+
+    class Kept(LocalDemo):
+        def check(self, query):
+            return {"key": query, "resumable": True, "cwd_missing": False}
+
+        def attach(self, query, cwd=None):
+            calls.append(("attach", query))
+            return LaunchPlan("pi", "/usr/bin/tmux", ("/usr/bin/tmux", "attach"), str(tmp_path), {})
+
+        def resume(self, query, cwd=None):
+            calls.append(("resume", query))
+            return LaunchPlan("pi", "/fake/pi", ("/fake/pi",), str(tmp_path), {})
+
+    manager = Kept()
+    manager.rows = [replace(row, resident=True) for row in manager.rows]
+    app = FourtopApp(manager, workspace=FakeWorkspace())
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(.3)
+        await pilot.press("enter")
+        await pilot.pause(.3)
+        assert calls == [("attach", app.current().key)]
+        await pilot.press("q")

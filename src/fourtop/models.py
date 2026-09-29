@@ -71,6 +71,9 @@ class Session:
     activity: str = ""
     last_request: str = ""
     branch: str = ""
+    # An agent for this session runs in its host's agent server now (fourtop.resident),
+    # as tmux on that host answered; nothing is recorded.
+    resident: bool = False
 
     def json(self) -> dict[str, Any]:
         result = asdict(self)

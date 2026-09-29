@@ -13,9 +13,11 @@ retains six JSON fields; the typed Python API is versioned independently.
 `fourtop.services.Manager` is the common CLI/TUI application service. Its unit is
 a **session**, not a process: one row is a `HistoryRecord` plus the host it was
 found on. `fourtop.models.Session` carries `key`, `agent`, `host`, `cwd`, `title`,
-`started`, `last`, `source`, `status`, `problems` and `can_resume`, and nothing
-else. There is no launch record, no ownership marker and no liveness field, because
-there is nothing to observe: a native agent is resumable from its transcript alone.
+`started`, `last`, `source`, `status`, `problems` and `can_resume`, plus what
+session-ls reads from the transcript's end (`activity`, `last_request`, `branch`).
+There is no launch record and no ownership marker: a native agent is resumable from
+its transcript alone. `resident` is not a record either; it is the host's tmux
+answering, at the moment of listing, whether an agent for the session runs there.
 
 `fourtop.agents.Drivers` turns a capability probe into an exact argv. `plan_new`
 preallocates a session identifier when the CLI advertises one, so a new session
@@ -40,6 +42,11 @@ optional command path. The local side runs the remote CLI's read-only commands
 (`list --json --sync`, `search --json`, `preview`, `check`, `doctor --json`) with
 `BatchMode=yes`, compression, a `ControlMaster` socket inside private state, and a
 hard timeout; anything that starts a process is handed to `ssh -t` instead.
+`fourtop.resident` is the host side of that: `attach` keeps the agent in a tmux
+server of the host's own (`4top-agents`) and only attaches the ssh session to it,
+so a dropped link detaches instead of killing the agent. Which sessions have an
+agent there is asked of that server each time (`list-sessions`) and reported as
+the row's `resident`; like the panel's layout, it records nothing.
 `fourtop.sync` makes refresh incremental: only rows written since a cursor travel,
 and a digest over every row proves the merged view equal to the host's, or one
 full listing follows.
@@ -87,7 +94,8 @@ The Pi preview is file order, explicitly not a reconstruction of its active tree
 
 ## Deliberate alpha limits
 
-No liveness records (only tmux's own answer), no process migration, no semantic
+No liveness records (only tmux's own answer, in the layout and on each host), no
+restart of an agent that exited, no process migration, no semantic
 status inference, no automatic Codex-history binding, no auto-restart, no worktree
 isolation and no Cursor runtime driver. Polling over ssh is the ceiling: push
 updates would require a daemon and are out of scope.

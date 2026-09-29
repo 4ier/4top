@@ -45,10 +45,18 @@ def digest(prints: dict[str, str]) -> str:
 
 
 def trailer(payloads: list[dict[str, Any]]) -> dict[str, Any]:
-    """What the host appends after the changed rows: a summary of all of them."""
+    """What the host appends after the changed rows: a summary of all of them.
+
+    ``resident`` lists the sessions with an agent running on the host. An agent
+    starts or exits without writing its transcript, so the cursor cannot see that
+    change; the client applies this list to every row before comparing digests,
+    instead of fetching every row again. Its presence also says the host has
+    ``attach``.
+    """
     return {"version": SYNC_VERSION, "count": len(payloads),
             "digest": digest({str(p["key"]): fingerprint(p) for p in payloads}),
-            "cursor": max((str(p.get("last") or "") for p in payloads), default="")}
+            "cursor": max((str(p.get("last") or "") for p in payloads), default=""),
+            "resident": sorted(str(p["key"]) for p in payloads if p.get("resident"))}
 
 
 def changed_since(payloads: list[dict[str, Any]], since: str | None) -> list[dict[str, Any]]:
@@ -69,6 +77,7 @@ class SyncState:
         self.payloads: dict[str, dict[str, Any]] = {}
         self.cursor = ""
         self.supported: bool | None = None  # None until the host has answered once
+        self.attach = False  # the host keeps agents in its own tmux (its trailer says so)
 
     def reset(self) -> None:
         self.payloads, self.cursor = {}, ""
@@ -90,6 +99,7 @@ class SyncState:
         rows = [row for row in value["rows"] if isinstance(row, dict) and "key" in row]
         self.payloads = {str(row["key"]): row for row in rows}
         self.cursor = str(value.get("cursor") or "")
+        self.attach = value.get("attach") is True
         return True
 
     def save(self) -> None:
@@ -98,6 +108,7 @@ class SyncState:
         try:
             private_dir(self.cache.parent)
             atomic_json(self.cache, {"schema_version": CACHE_SCHEMA, "identity": self.identity,
-                                     "cursor": self.cursor, "rows": list(self.payloads.values())})
+                                     "cursor": self.cursor, "attach": self.attach,
+                                     "rows": list(self.payloads.values())})
         except OSError:
             pass  # A cache that cannot be written only costs the next start a round trip.
