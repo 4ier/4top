@@ -618,8 +618,10 @@ class FourtopApp(App[tuple | None]):
             return
         if ended:
             names = ", ".join(self._label(pane.key) for pane in ended)
-            if all(pane.status == 255 and self._keeps(pane.key) for pane in ended):
-                # ssh lost the link; the agent is in its host's own tmux, not in ssh.
+            # ssh exits 255 when it loses the link, and has no status at all when it is
+            # killed (by Android, by Termux, by hand); neither ends an agent that lives
+            # in its host's own tmux. An agent's own exit comes back as its code.
+            if all(pane.status in (255, None) and self._keeps(pane.key) for pane in ended):
                 self.set_status(f"Disconnected: {names}. It keeps running on its host; "
                                 "Enter attaches again.")
             else:
