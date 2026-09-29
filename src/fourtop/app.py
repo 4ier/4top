@@ -1281,10 +1281,15 @@ class FourtopApp(App[tuple | None]):
         if not count:
             self._close_panel(close=True)
             return
-        kept = (" Agents kept on a remote host only lose this view and keep running there."
-                if any(self._keeps(tag) for tag in self.opened) else "")
-        self.push_screen(Confirm("Close everything", f"{count} open session(s) will be stopped. "
-                                 "Their transcripts are kept and can be opened again." + kept,
+        kept = sum(self._keeps(tag) for tag in self.opened)
+        parts = []
+        if count > kept:
+            parts.append(f"{count - kept} open session(s) will be stopped. Their transcripts "
+                         "are kept and can be opened again.")
+        if kept:
+            parts.append(f"{kept} kept on a remote host only lose this view and keep running there.")
+        message = " ".join(parts)
+        self.push_screen(Confirm("Close everything", message,
                                  destructive=True, confirm="Close all"),
                          lambda yes: self._close_panel(close=True) if yes else None)
 
