@@ -1,7 +1,8 @@
 """One application service layer for both CLI and TUI.
 
-4top reads native history and starts native processes. It does not own a process,
-a terminal or a multiplexer, so nothing here tracks liveness.
+4top reads native history and starts native processes. It does not own a process
+or a terminal. Which agents run on this host is asked of tmux (fourtop.resident)
+each time, so nothing here records liveness.
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import os
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from session_ls import _injected
@@ -24,6 +26,7 @@ from session_ls.api import (
     utc_now,
 )
 
+from . import resident
 from .agents import Drivers
 from .config import Config, Host
 from .errors import Conflict, FourtopError, Missing
@@ -86,6 +89,7 @@ class Manager:
         self._history_at = 0.0
         self._history_lock = threading.Lock()
         self.stop_event = threading.Event()
+        self._running, self._running_at = set(), float("-inf")
         if host is None:
             self.index = HistoryIndex(config.roots, config.cache_dir / "history.json",
                                       self.store.host_id, config.metadata_max_bytes,
@@ -102,6 +106,11 @@ class Manager:
             if self.sync.load():
                 self._remote = Snapshot(rows_of(host, self.sync.payloads.values()),
                                         scope=host.name, cached=True)
+
+    @property
+    def keeps_agents(self) -> bool:
+        """The host keeps agents in its own tmux, so opening one there attaches."""
+        return self.host is not None and self.sync.attach
 
     @property
     def scope(self) -> str:
@@ -137,11 +146,16 @@ class Manager:
                 self._remote = remote_snapshot(self.config, self.host, self.sync)
             return self._remote
         history = self.history() if load_history else self._history
-        # The panel asks every second; rows are rebuilt only when the scan changed.
+        # The panel asks every second; rows are rebuilt only when the scan changed, and
+        # tmux is asked which agents run here as often as history is scanned.
         if getattr(self, "_rows_of", None) is not history:
             self._rows_of, self._rows = history, [row_for(record) for record in history.records]
-        return Snapshot(list(self._rows), list(dict.fromkeys(history.issues)), history.observed_at,
-                        "local")
+        now = time.monotonic()
+        if load_history or now - self._running_at >= self.config.history_refresh_seconds:
+            self._running, self._running_at = resident.running(self.config.environment), now
+        rows = [replace(row, resident=True) if resident.session_name(row.key) in self._running
+                else row for row in self._rows] if self._running else list(self._rows)
+        return Snapshot(rows, list(dict.fromkeys(history.issues)), history.observed_at, "local")
 
     def search(self, query: str, full=False, cancel=None) -> Snapshot:
         if self.host is not None:
@@ -263,6 +277,23 @@ class Manager:
         if self.host is not None:
             raise Missing("Resuming a session on another host runs there; see remote_argv")
         return self.drivers.plan_resume(self.resolve_history(query), cwd)
+
+    def attach(self, query: str, cwd: str | None = None) -> LaunchPlan:
+        """Show the session's agent from this host's agent server, starting it there
+        first if none is running. Without tmux this is a plain resume."""
+        if self.host is not None:
+            raise Missing("Attaching to a session on another host runs there; see remote_argv")
+        record = self.resolve_history(query)
+        name = resident.session_name(record.key)
+        if name in resident.running(self.config.environment):
+            plan = resident.attach(self.config, name, record.agent)
+            if plan is not None:
+                return plan
+        return resident.keep(self.config, self.drivers.plan_resume(record, cwd), name)
+
+    def keep(self, plan: LaunchPlan) -> LaunchPlan:
+        """A planned agent, started in this host's agent server instead of this terminal."""
+        return resident.keep(self.config, plan)
 
     def remote_argv(self, args: list[str]) -> list[str]:
         if self.host is None:

@@ -138,3 +138,28 @@ def test_the_cli_speaks_sync(lab):
     assert result.returncode == 0, result.stderr
     summary = json.loads(result.stdout.splitlines()[-1])["sync"]
     assert summary["count"] == 0 and summary["version"] == 1
+
+
+def test_an_agent_starting_or_exiting_costs_no_full_fetch(fake, tmp_path):
+    # A resident agent starts or exits without writing its transcript, so the cursor
+    # cannot see it; the trailer's list of running sessions carries the change.
+    from dataclasses import replace
+    host = fake([row("a", "2026-09-28T10:00:00+00:00"), row("b", "2026-09-27T10:00:00+00:00")])
+    sync = SyncState(tmp_path / "venus.json", "me@venus")
+    hosts.remote_snapshot(None, HOST, sync)
+    assert sync.attach, "a host whose trailer lists its agents has `attach`"
+    for running in (True, False):
+        host.rows[1] = replace(host.rows[1], resident=running)
+        host.calls.clear()
+        snapshot = hosts.remote_snapshot(None, HOST, sync)
+        assert [item.resident for item in snapshot.rows] == [False, running]
+        assert len(host.calls) == 1 and "--since" in host.calls[0], "still incremental"
+    again = SyncState(tmp_path / "venus.json", "me@venus")
+    assert again.load() and again.attach, "remembered for the next start"
+
+
+def test_an_older_host_is_not_asked_to_attach(fake, tmp_path):
+    fake([row("a", "2026-09-28T10:00:00+00:00")], syncs=False)
+    sync = SyncState(tmp_path / "venus.json", "me@venus")
+    hosts.remote_snapshot(None, HOST, sync)
+    assert not sync.attach

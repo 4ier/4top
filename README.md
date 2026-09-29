@@ -75,7 +75,8 @@ keeps the first one running in the background; `●` marks the open ones, and En
 on one shows it again. `Alt-←` / `Alt-→` (or `→` in the list, or a click) move
 between the list and the agent. On a narrow screen, such as a phone, the focused
 side fills the screen. **`q` detaches**: the agents keep running, and running `4top`
-again brings everything back. `Q` closes them all.
+again brings everything back. `Q` closes them all, except that an agent kept on a
+remote host (below) only loses this view.
 
 Without tmux, or with `layout = "plain"`, Enter runs the agent in this terminal and
 the list returns when it exits.
@@ -94,7 +95,10 @@ the list returns when it exits.
 
 Each row says what the session is doing, from the end of its transcript: `⟳ working`
 while the agent is mid-turn, `▶ your turn` once it has handed the turn back, and
-`✗ stopped` for a turn that went silent for ten minutes. A third line, `› …`, is
+`✗ stopped` for a turn that went silent for ten minutes. A session whose agent is
+running on its host, as that host's tmux says, is marked `○` when this panel is not
+showing it, and is never called stopped: a long tool call is silence, not a stop.
+A third line, `› …`, is
 your latest request when it differs from how the session began, and the git branch
 joins the project. Badges are shown for the last day only; older sessions are history.
 
@@ -119,8 +123,8 @@ Resume uses the CLI's **current native configuration**; 4top does not replay the
 original launch flags. Review native permissions before sending another task.
 
 4top keeps no record of processes either. In the tmux layout a pane is tagged with
-the session it runs, and `●` means tmux has that pane now; nothing else is
-remembered. Failed queries are reported as issues and never rendered as an empty
+the session it runs, and `●` means tmux has that pane now; `○` likewise means the
+host's own tmux has that agent now. Nothing else is remembered. Failed queries are reported as issues and never rendered as an empty
 machine.
 
 Two consequences worth knowing. A resumed agent is a **new** process; two agents in
@@ -162,9 +166,20 @@ different row schema is refused instead of partially parsed.
 Before it hands over the terminal, the panel asks the host that owns the session
 whether the resume can work there (`4top check`). A host without that agent
 installed, or a session whose directory is gone, is reported in the panel instead
-of failing during the hand-over, where the message would be painted over. The ssh
-connection also keeps a liveness probe, so a link that dies becomes an error rather
-than a hang, and the session stays in its transcript to be resumed again.
+of failing during the hand-over, where the message would be painted over.
+
+**Agents stay on their host.** With tmux installed there, the host runs the agent in
+a tmux server of its own (`4top-agents`, apart from yours), and the panel's ssh
+connection only attaches to it (`4top attach`). A dropped link, a killed terminal
+app or a closed panel detaches; the agent keeps working. Opening the session again,
+from the same device or another one, attaches to the same process instead of
+starting a second. That server has no status line and no prefix key, so every key
+reaches the agent. The ssh connection keeps a liveness probe, so a link that dies
+becomes "Disconnected" in about 45 seconds rather than a hang. A host running an
+older 4top is resumed as before, and on a host without tmux the agent lives in the
+ssh session, as before. Sessions of this machine still open in the panel's own
+layout, but one already kept here (opened from another device) is attached rather
+than started a second time.
 
 ## Command line
 
@@ -178,6 +193,8 @@ than a hang, and the session stays in its transcript to be resumed again.
 4top check h_<key> --json                 # would a resume work here, and why not
 4top new codex -- --model MODEL           # native arguments after --
 4top resume h_<key> --yes                 # restore this process as the agent
+4top attach h_<key>                       # the agent in this host's own tmux; started if needed
+4top new codex --resident                 # a new agent kept there too
 4top doctor --json
 ```
 
@@ -191,7 +208,8 @@ first and falls back to a tunnel from this machine.
 may be shortened only when their prefixes are unambiguous (at least four
 characters). Row numbers are never execution targets. `list --json` rows carry
 `schema_version`, `key`, `agent`, `host`, `cwd`, `title`, `started`, `last`,
-`source`, `status` and `can_resume`.
+`source`, `status`, `can_resume` and `resident` (an agent for it runs in this host's
+own tmux now).
 
 ## Configuration and privacy
 

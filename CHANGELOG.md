@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Remote agents stay on their host.** Opening a session on a host now runs
+  `4top attach` there: the agent lives in a tmux server of that host's own
+  (`4top-agents`, apart from yours), and the ssh connection only attaches to it. A
+  dropped link, a killed Termux or a closed panel detaches; the agent keeps
+  working, and opening the session again, from this device or another, attaches to
+  the same process. Before, the agent was sshd's child and died with the link,
+  confirmed on the tablet. `4top new AGENT --resident` does the same for a new agent.
+- Rows carry `resident`: tmux on the host says an agent for the session runs there
+  now. The panel marks such a row `○` when it is not showing it, and never calls it
+  stopped. Nothing is recorded, and starting or exiting an agent costs no full
+  listing: the sync trailer carries the list of resident sessions.
+- A host running an older 4top is resumed as before, a host without tmux runs the
+  agent in the ssh session as before, and a local session already kept on this
+  machine is attached instead of started twice.
+
 - The list is fitted to the window after a rotation: judged by its own, scaled-down
   width it looked like a narrow screen and stayed 25 columns wide on the tablet.
 

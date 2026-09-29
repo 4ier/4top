@@ -24,6 +24,7 @@ COMMANDS = (
     ("check", "Report whether one session can be resumed here"),
     ("new", "Start an original agent in this terminal"),
     ("resume", "Resume one exact session as a new process"),
+    ("attach", "Show a session's agent kept on this host, starting it if needed"),
     ("doctor", "Read dependency and source diagnostics"),
 )
 
@@ -74,10 +75,16 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("agent", choices=("codex", "claude", "pi"))
             sub.add_argument("--cwd", default=os.getcwd())
             sub.add_argument("--yes", action="store_true", help="Confirm a start on another host")
+            sub.add_argument("--resident", action="store_true",
+                             help="Keep the agent in this host's own tmux, so a closed terminal "
+                                  "or a dropped link does not end it")
         if command == "resume":
             sub.add_argument("key", help="Stable key / unique native ID prefix; never a row number")
             sub.add_argument("--cwd", help="Explicit override for a historical working directory")
             sub.add_argument("--yes", action="store_true", help="Explicitly confirm this exact operation")
+        if command == "attach":
+            sub.add_argument("key", help="Stable key / unique native ID prefix; never a row number")
+            sub.add_argument("--cwd", help="Explicit override for a historical working directory")
     return ap
 
 
@@ -235,9 +242,11 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                 confirm(f"Start {args.agent} on {manager.scope} through ssh?\n"
                         f"Directory: {args.cwd}\nThe remote CLI runs with its own configuration.",
                         args.yes)
-                remote = ["new", args.agent, "--cwd", args.cwd] + (["--", *extra] if extra else [])
+                remote = (["new", args.agent, "--cwd", args.cwd] + (["--resident"] if args.resident else [])
+                          + (["--", *extra] if extra else []))
                 return _exec(manager.remote_argv(remote))
-            return _hand_over(manager, manager.new(args.agent, args.cwd, extra))
+            plan = manager.new(args.agent, args.cwd, extra)
+            return _hand_over(manager, manager.keep(plan) if args.resident else plan)
         if command == "resume":
             local = not manager.remote
             target = manager.resolve_history(args.key) if local else None
@@ -253,6 +262,12 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                 command_line = ["resume", args.key] + (["--cwd", args.cwd] if args.cwd else []) + ["--yes"]
                 return _exec(manager.remote_argv(command_line))
             return _hand_over(manager, manager.resume(args.key, args.cwd))
+        if command == "attach":
+            # What the panel runs to open a session on a host: no confirmation, like Enter.
+            if manager.remote:
+                return _exec(manager.remote_argv(["attach", args.key]
+                                                 + (["--cwd", args.cwd] if args.cwd else [])))
+            return _hand_over(manager, manager.attach(args.key, args.cwd))
         raise FourtopError("Unknown operation", 2)
     finally:
         manager.close()

@@ -1,0 +1,109 @@
+"""Agents kept on their host, against real tmux servers on private sockets.
+
+The "device" is a tmux server of its own whose pane runs `4top attach`, the way the
+panel's pane runs it over ssh. Killing that server is the dropped link: the client
+goes, and the agent must not.
+"""
+import hashlib
+import json
+import os
+import shutil
+import subprocess
+import sys
+import uuid
+
+import pytest
+from conftest import eventually
+
+from fourtop.resident import running
+
+pytestmark = pytest.mark.skipif(shutil.which("tmux") is None, reason="tmux is not installed")
+
+
+@pytest.fixture
+def host(lab):
+    lab.env["FOURTOP_AGENTS_SOCKET"] = f"4top-agents-test-{uuid.uuid4().hex[:8]}"
+    devices = []
+
+    def device(*args):
+        """A terminal on another machine: a tmux server whose pane runs 4top there."""
+        name = f"4top-device-{uuid.uuid4().hex[:8]}"
+        devices.append(name)
+        command = [sys.executable, "-m", "fourtop", "--config", str(lab.config_file), *args]
+        subprocess.run(["tmux", "-L", name, "-f", "/dev/null", "new-session", "-d", "-x", "120",
+                        "-y", "30", "--", *command], check=True, env=lab.env)
+        return name
+
+    yield lab, device
+    for name in [*devices, lab.env["FOURTOP_AGENTS_SOCKET"]]:
+        subprocess.run(["tmux", "-L", name, "kill-server"], env=lab.env, capture_output=True)
+
+
+def reports(lab):
+    folder = lab.path / "reports"
+    return [json.loads(path.read_text()) for path in folder.glob("*.json")] if folder.is_dir() else []
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def screen(name, env):
+    return subprocess.run(["tmux", "-L", name, "capture-pane", "-p"], capture_output=True,
+                          text=True, env=env).stdout
+
+
+def test_an_attached_agent_outlives_its_link_and_is_attached_again(host):
+    lab, device = host
+    assert subprocess.run(lab.manager.new("pi", str(lab.path)).argv, cwd=str(lab.path), env=lab.env,
+                          stdin=subprocess.DEVNULL, capture_output=True, timeout=30).returncode == 0
+    (key,) = [record.key for record in lab.manager.history(force=True).records]
+    first = device("attach", key)
+    agent = eventually(lambda: [r for r in reports(lab) if "--session" in r["argv"]])[0]
+    assert running(lab.env) == {key}, "the tmux session is named after the history key"
+    assert json.loads(lab.cli("list", "--json").stdout)["resident"] is True
+
+    subprocess.run(["tmux", "-L", first, "kill-server"], env=lab.env, check=True)  # the link drops
+    assert alive(agent["pid"]) and running(lab.env) == {key}, "the agent does not go with it"
+
+    second = device("attach", key)
+    eventually(lambda: "COUNT=" in screen(second, lab.env))
+    assert [r["pid"] for r in reports(lab) if "--session" in r["argv"]] == [agent["pid"]], \
+        "attaching again shows the same process instead of starting another"
+
+    subprocess.run(["tmux", "-L", second, "send-keys", "exit", "Enter"], env=lab.env, check=True)
+    eventually(lambda: not alive(agent["pid"]))
+    eventually(lambda: running(lab.env) == set())
+    assert json.loads(lab.cli("list", "--json").stdout)["resident"] is False
+
+
+def test_a_new_resident_agent_is_found_by_its_session_key(host):
+    lab, device = host
+    device("new", "pi", "--cwd", str(lab.path), "--resident")
+    agent = eventually(lambda: reports(lab))[0]
+    (record,) = eventually(lambda: lab.manager.history(force=True).records)
+    assert record.native_id == agent["native_id"]
+    assert running(lab.env) == {record.key}, "pi's preallocated id names the session"
+    assert agent["cwd"] == str(lab.path)
+    canary = hashlib.sha256(lab.env["TEST_CANARY"].encode()).hexdigest()
+    assert agent["canary_hash"] == canary, "the environment reaches the kept agent"
+    # The server now running was started with the first connection's environment;
+    # a later one that differs still reaches its own agent.
+    lab.env["TEST_CANARY"] = "a-later-connection"
+    device("new", "pi", "--cwd", str(lab.path), "--resident")
+    later = eventually(lambda: [r for r in reports(lab) if r["pid"] != agent["pid"]])[0]
+    assert later["canary_hash"] == hashlib.sha256(b"a-later-connection").hexdigest()
+    assert len(running(lab.env)) == 2
+
+
+def test_without_tmux_attach_is_a_plain_resume(lab):
+    subprocess.run(lab.manager.new("pi", str(lab.path)).argv, cwd=str(lab.path), env=lab.env,
+                   stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+    (key,) = [record.key for record in lab.manager.history(force=True).records]
+    lab.config.environment["PATH"] = str(lab.path / "bin")
+    plan = lab.manager.attach(key)
+    assert plan.argv[0].endswith("/pi") and "--session" in plan.argv

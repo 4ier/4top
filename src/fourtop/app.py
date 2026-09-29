@@ -4,7 +4,8 @@ Every configured machine is listed at once, one section each, local first. A
 section shows a fixed number of sessions and pages through the rest, so a busy
 machine cannot push the others off the screen. Inside 4top's tmux layout, opening
 a session shows it beside the list and keeps it running when another is opened;
-outside it, the session takes over this terminal until it exits.
+outside it, the session takes over this terminal until it exits. A remote agent
+runs in its host's own tmux (fourtop.resident), so a dropped link only detaches.
 """
 from __future__ import annotations
 
@@ -55,16 +56,19 @@ def when(last: str) -> str:
 STALE_WORKING = 600  # a turn with no write for this long has stopped, not paused
 RECENT = 86400  # older sessions are history: no state is worth a badge
 STATE_STYLE = {"⟳ working": "bold cyan", "▶ your turn": "bold magenta",
-               "✗ stopped": "bold red", "active now": "bold yellow"}
+               "✗ stopped": "bold red", "active now": "bold yellow", "running": "bold green"}
 
 
 def state(row: Session) -> str:
-    """What the session is doing, as far as its transcript says."""
+    """What the session is doing, as far as its transcript and its host say."""
     try:
         seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(row.last)).total_seconds()
     except (TypeError, ValueError):
-        return ""
-    if seconds > RECENT:
+        seconds = None
+    if row.resident:
+        # Its host says the agent is running: a long tool call is silence, not a stop.
+        return {"working": "⟳ working", "waiting": "▶ your turn"}.get(row.activity, "running")
+    if seconds is None or seconds > RECENT:
         return ""
     if row.activity == "working":
         return "⟳ working" if seconds < STALE_WORKING else "✗ stopped"
@@ -614,10 +618,20 @@ class FourtopApp(App[tuple | None]):
             return
         if ended:
             names = ", ".join(self._label(pane.key) for pane in ended)
-            self.set_status(f"Ended: {names}. Its transcript is unchanged; Enter opens it again.")
+            if all(pane.status == 255 and self._keeps(pane.key) for pane in ended):
+                # ssh lost the link; the agent is in its host's own tmux, not in ssh.
+                self.set_status(f"Disconnected: {names}. It keeps running on its host; "
+                                "Enter attaches again.")
+            else:
+                self.set_status(f"Ended: {names}. Its transcript is unchanged; Enter opens it again.")
         if set(panes) != set(self.opened):
             self.opened = panes
             self.render_list()
+
+    def _keeps(self, tag: str) -> bool:
+        host = tag.partition(":")[0]
+        return any(source.name == host and getattr(source.manager, "keeps_agents", False)
+                   for source in self.sources)
 
     def _label(self, tag: str) -> str:
         found = self._find(tag)
@@ -778,7 +792,8 @@ class FourtopApp(App[tuple | None]):
         opened = tag in self.opened
         title = first_line(row.title)
         head = Text()
-        head.append("● " if opened else "  ", style="bold green")
+        # ● open in this panel; ○ running on its host, not shown here.
+        head.append("● " if opened else "○ " if row.resident else "  ", style="bold green")
         head.append(title or "(untitled)", style="bold" if opened else "" if title else "dim italic")
         head.truncate(width, overflow="ellipsis")
         foot = Text("    ")
@@ -1109,10 +1124,17 @@ class FourtopApp(App[tuple | None]):
         self._busy(tag, "starting")
         try:
             if manager.remote:
-                remote = ["resume", row.key, "--yes"] + (["--cwd", cwd] if cwd else [])
+                # A host that keeps agents runs this one in its own tmux, so a dropped
+                # link leaves it running and opening it again attaches. An older host
+                # has no `attach` and resumes it as before.
+                remote = (["attach", row.key] if manager.keeps_agents
+                          else ["resume", row.key, "--yes"]) + (["--cwd", cwd] if cwd else [])
                 argv, directory, env = manager.remote_argv(remote), str(Path.home()), {}
             else:
-                plan = await asyncio.to_thread(manager.resume, row.key, cwd)
+                # An agent already kept here (opened from another device) is shown,
+                # not started a second time.
+                opening = manager.attach if row.resident else manager.resume
+                plan = await asyncio.to_thread(opening, row.key, cwd)
                 argv, directory, env = list(plan.argv), plan.cwd, plan.environment
         except (FourtopError, OSError, ValueError) as exc:
             self._busy(tag, None)
@@ -1168,7 +1190,8 @@ class FourtopApp(App[tuple | None]):
         manager = source.manager
         try:
             if manager.remote:
-                argv = manager.remote_argv(["new", agent, "--cwd", cwd, "--yes"])
+                argv = manager.remote_argv(["new", agent, "--cwd", cwd, "--yes"]
+                                           + (["--resident"] if manager.keeps_agents else []))
                 directory, env = str(Path.home()), {}
             else:
                 plan = await asyncio.to_thread(manager.new, agent, cwd)
@@ -1223,8 +1246,9 @@ class FourtopApp(App[tuple | None]):
         if self.workspace:
             lines += ["Alt-← Alt-→  list / agent (or →, or tap)",
                       "● open: keeps running when you switch",
+                      "○ running on its host, not shown here",
                       "q  detach (agents keep running)",
-                      "Q  close everything"]
+                      "Q  close everything open here"]
         else:
             lines += ["Enter runs the agent here; the list",
                       "returns when it exits. With tmux it",
@@ -1257,8 +1281,10 @@ class FourtopApp(App[tuple | None]):
         if not count:
             self._close_panel(close=True)
             return
+        kept = (" Agents kept on a remote host only lose this view and keep running there."
+                if any(self._keeps(tag) for tag in self.opened) else "")
         self.push_screen(Confirm("Close everything", f"{count} open session(s) will be stopped. "
-                                 "Their transcripts are kept and can be opened again.",
+                                 "Their transcripts are kept and can be opened again." + kept,
                                  destructive=True, confirm="Close all"),
                          lambda yes: self._close_panel(close=True) if yes else None)
 

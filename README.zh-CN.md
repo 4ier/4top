@@ -45,7 +45,7 @@ Cursor 转录只读，不提供启动或恢复。
 文件树旁边的文件。再打开别的会话时，之前的会继续在后台运行；`●` 标记已打开的会话，对它按
 Enter 会把它切回来。`Alt-←` / `Alt-→`（或在列表里按 `→`、或直接点击）在列表和 agent 之间切换。
 在手机这类窄屏上，获得焦点的一侧占满屏幕。**`q` 是脱离**：agent 继续运行，再运行 `4top` 就能
-接回原来的样子；`Q` 关闭全部。
+接回原来的样子；`Q` 关闭全部，但常驻在远程主机上的 agent（见下文）只是不再在这里显示。
 
 没有 tmux 或设置 `layout = "plain"` 时，Enter 在当前终端里运行 agent，退出后回到列表。
 
@@ -63,6 +63,8 @@ Enter 会把它切回来。`Alt-←` / `Alt-→`（或在列表里按 `→`、�
 
 每一行根据转录的末尾显示会话在做什么：`⟳ working` 表示 agent 正在执行，
 `▶ your turn` 表示它已经把回合交还给你，`✗ stopped` 表示执行中途超过十分钟没有动静。
+如果主机上的 tmux 表示这个会话的 agent 正在那里运行，而本面板没有显示它，行首标 `○`；
+这样的会话不会被标成 stopped：长时间的工具调用只是安静，不是停了。
 如果你最后一次的要求和开场白不同，会在第三行 `› …` 显示，项目名后面还会带上 git 分支。
 状态标记只针对最近一天内的会话，更早的视为历史。
 
@@ -116,6 +118,15 @@ ssh = "me@build-box"                 # 任意 ssh 目标，包括 tailnet 名称
 （ControlMaster）让刷新保持廉价，BatchMode 让缺少密钥时快速失败而不是卡在提示上，
 行 schema 不一致的远端会被拒绝而不是部分解析。
 
+**agent 常驻在它所在的主机上。** 主机装了 tmux 时，agent 运行在那台主机上 4top 专用的
+tmux 服务里（`4top-agents`，与你自己的 tmux 分开），面板的 ssh 连接只是接入它
+（`4top attach`）。断网、终端 App 被杀、面板关闭，都只是断开接入，agent 继续干活。再次打开
+这个会话，无论从同一台设备还是另一台，都会接回同一个进程，而不是再启动一个。这个 tmux 服务
+没有状态栏、没有前缀键，所有按键都交给 agent。ssh 连接带存活探测，断掉的链路大约 45 秒后
+显示为 "Disconnected"，而不是卡住。运行旧版 4top 的主机仍按原来的方式恢复；没有 tmux 的
+主机上，agent 仍在 ssh 会话里运行。本机的会话仍在面板自己的布局里打开，但已经常驻在本机的
+（从另一台设备打开的）会被接入，而不是再启动一个。
+
 ## 命令行
 
 ```sh
@@ -128,13 +139,16 @@ ssh = "me@build-box"                 # 任意 ssh 目标，包括 tailnet 名称
 4top check h_<key> --json                 # 这个会话在这里能不能恢复，不能则给出原因
 4top new codex -- --model MODEL           # 原生参数放在 -- 之后
 4top resume h_<key> --yes                 # 把这个进程换成该 agent
+4top attach h_<key>                       # 本机专用 tmux 里的 agent；没有就先启动
+4top new codex --resident                 # 新 agent 也常驻在那里
 4top doctor --json
 ```
 
 `--config`、`--host`、`--no-color` 放在子命令前后均可。key 只有在前缀无歧义时
 （至少四个字符）才允许缩短；行号永远不是执行目标。`list --json` 每行包含
 `schema_version`、`key`、`agent`、`host`、`cwd`、`title`、`started`、`last`、
-`source`、`status`、`can_resume`。
+`source`、`status`、`can_resume`、`resident`（此刻这个会话有 agent 在本机专用的 tmux
+里运行）。
 
 ## 配置与隐私
 
