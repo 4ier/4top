@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- A remote session whose ssh was killed (by Android, by Termux) says "Disconnected"
+  on a host that keeps agents, like a dropped link: the agent keeps running there.
+  It said "Ended". Found by killing the ssh on the tablet: the agent survived.
+
 - **Remote agents stay on their host.** Opening a session on a host now runs
   `4top attach` there: the agent lives in a tmux server of that host's own
   (`4top-agents`, apart from yours), and the ssh connection only attaches to it. A

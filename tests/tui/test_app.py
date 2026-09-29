@@ -214,6 +214,12 @@ class FakeWorkspace:
     def reap(self):
         return []
 
+    def poll(self):
+        ended, self.ending = getattr(self, "ending", []), []
+        for pane in ended:
+            self.panes_by_tag.pop(pane.key, None)
+        return dict(self.panes_by_tag), ended
+
     def stage(self):
         return "%1"
 
@@ -679,3 +685,31 @@ async def test_a_local_agent_kept_on_this_host_is_attached_not_started_again(tmp
         await pilot.pause(.3)
         assert calls == [("attach", app.current().key)]
         await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_killed_link_to_a_host_that_keeps_agents_is_a_disconnect_not_an_end():
+    # ssh exits 255 when the link drops and has no status when Android or Termux
+    # kills it; either way the agent keeps running in its host's tmux. Only the
+    # agent's own exit, which comes back as its code, ends it.
+    class Remote(LocalDemo):
+        remote = True
+        keeps_agents = True
+
+        @property
+        def scope(self):
+            return "venus"
+
+    for status, word in ((None, "Disconnected"), (255, "Disconnected"), (0, "Ended")):
+        workspace = FakeWorkspace()
+        app = FourtopApp(Remote(), workspace=workspace)
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause(.2)
+            workspace.ending = [Pane("%9", "venus:demo_1", True, status)]
+            await app.poll_workspace()
+            assert word in status_text(app), (status, status_text(app))
+            await pilot.press("q")
+
+
+def status_text(app) -> str:
+    return str(app.query_one("#status", Static).render())
