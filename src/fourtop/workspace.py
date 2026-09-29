@@ -205,8 +205,14 @@ class Workspace:
         Not while a pane is zoomed: resizing a pane unzooms its window in tmux, and
         zooming the list (to read a preview) is itself the resize that calls this.
         """
-        if self.run("display-message", "-p", "-t", self.panel, "#{window_zoomed_flag}").strip() == "1":
+        zoomed, window = self.run("display-message", "-p", "-t", self.panel,
+                                  "#{window_zoomed_flag} #{window_width}").split()
+        if zoomed == "1":
             return
+        # The window's width, not the list's: after the screen rotates, tmux scales
+        # the list down with it (182 -> 113 columns left it 25 wide), and judged by
+        # its own width the list looked like a narrow screen and was never widened.
+        width = int(window)
         if width >= NARROW:
             self.run("resize-pane", "-t", self.panel, "-x", str(max(40, min(60, width * 2 // 5))))
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The list is fitted to the window after a rotation: judged by its own, scaled-down
+  width it looked like a narrow screen and stayed 25 columns wide on the tablet.
+
 ## 4top 0.2.0a7 — 2026-09-29
 
 - A preview opened in the layout now really takes the whole window: fitting the
