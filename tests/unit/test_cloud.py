@@ -198,12 +198,14 @@ def test_missing_credentials_create_nothing(sky):
     assert not fake.asked("POST", "/sandboxes")
 
 
-def test_the_daily_budget_counts_every_device_and_refuses_before_creating(sky):
+def test_the_daily_budget_counts_every_device_and_refuses_before_creating(sky, monkeypatch):
     lab, fake, config, origin, _ = sky
-    now = time.time()
+    # Midday, so three hours earlier are still today whenever the suite runs.
+    now = e2b.start_of_day() + 12 * 3600
+    monkeypatch.setattr(time, "time", lambda: now)
     # Three hours of a 2 vCPU / 2 GiB sandbox earlier today, from another device:
     # $0.40. Someone else's sandbox in the same project does not count.
-    other = fake.add({"fourtop": "1", "fourtop_name": "earlier"}, started=max(e2b.start_of_day(), now - 4 * 3600))
+    other = fake.add({"fourtop": "1", "fourtop_name": "earlier"}, started=now - 4 * 3600)
     fake.event({**other, "_since": now - 10800 - 60}, "killed", now - 60)
     del fake.sandboxes[other["sandboxID"]]
     stranger = fake.add({"user": "someone"}, started=now - 36000)
