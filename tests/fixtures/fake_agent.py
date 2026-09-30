@@ -33,7 +33,7 @@ native = native or str(uuid.uuid4())
 root_key = {"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR"}[agent]
 root_default = Path.home() / {"codex": ".codex", "claude": ".claude", "pi": ".pi/agent"}[agent]
 root = Path(os.environ.get(root_key, str(root_default)))
-now = "2026-09-24T00:00:00Z"
+now = os.environ.get("FAKE_NOW", "2026-09-24T00:00:00Z")
 text = os.environ.get("FAKE_TITLE", "verify continuity 中文")
 if agent == "codex":
     source = root / "sessions/2026/09/24" / ("rollout-2026-09-24-" + native + ".jsonl")

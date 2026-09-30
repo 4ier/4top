@@ -240,6 +240,30 @@ def test_a_remote_refusal_keeps_its_words_and_its_code(remote):
         manager.send(row, "hi")
 
 
+def test_a_placeholder_codex_session_is_named_only_when_unambiguous(monkeypatch):
+    from types import SimpleNamespace
+
+    from fourtop import resident
+    renamed = []
+    monkeypatch.setattr(resident, "tmux_binary", lambda env: "tmux")
+    monkeypatch.setattr(resident, "_tmux", lambda tmux, env, *args: renamed.append(args)
+                        or SimpleNamespace(returncode=0))
+    rows = [Session("h_old", "codex", "/srv/app", "", "2026-09-30T00:00:00+00:00", ""),
+            Session("h_new", "codex", "/srv/app", "", "2026-09-30T00:10:03+00:00", ""),
+            Session("h_later", "codex", "/srv/app", "", "2026-09-30T00:20:00+00:00", ""),
+            Session("h_pi", "pi", "/srv/app", "", "2026-09-30T00:10:01+00:00", "")]
+    created = 1790727000.0  # 2026-09-30T00:10:00Z
+    monkeypatch.setattr(resident, "unnamed", lambda env: [("new-codex-1", created, "/srv/app")])
+    assert resident.adopt({}, rows, set()) == {"new-codex-1": "h_new"}, \
+        "the earliest Codex session that began after the placeholder did"
+    assert renamed == [("rename-session", "-t", "=new-codex-1", "h_new")]
+    assert resident.adopt({}, rows, {"h_new"}) == {"new-codex-1": "h_later"}, \
+        "a session whose agent is already running is not taken twice"
+    monkeypatch.setattr(resident, "unnamed", lambda env: [("new-codex-1", created, "/srv/app"),
+                                                          ("new-codex-2", created, "/srv/app")])
+    assert resident.adopt({}, rows, set()) == {}, "two placeholders in one directory: no guess"
+
+
 def test_changes_from_a_host_are_numbers_and_a_flag():
     assert hosts.changes_from({"files": 2, "insertions": "9", "deletions": -1, "dirty": True,
                                "evil": "x"}) == {"files": 2, "dirty": True}

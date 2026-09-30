@@ -119,7 +119,10 @@ ssh session at all.
   `[agents.NAME] args`) is started in `new-session -A -s KEY`, which also covers two
   devices opening it at the same moment. `new --resident` is the same for a new
   agent; it is named by its preallocated session identifier where the CLI has one,
-  so a later `attach` finds it.
+  so a later `attach` finds it. Codex has none, so a new Codex agent starts as
+  `new-codex-…` and is renamed to its history key once its transcript exists: the
+  earliest Codex session in that directory that began after the tmux session did,
+  and never a guess between two such placeholders in one directory.
 - That server is usually drawn inside another tmux (the panel), so its configuration
   keeps out of the way: no status line, prefix `None` so `C-b` reaches the agent or
   the outer tmux, mouse on, and `window-size latest` so the device used last sets

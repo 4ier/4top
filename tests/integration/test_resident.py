@@ -158,6 +158,22 @@ def test_deny_presses_escape_and_send_pastes_then_enters(host):
     assert typed == "\x1b-a line that starts with a dash\n"
 
 
+def test_a_new_codex_agent_is_found_by_the_key_its_transcript_got(host):
+    # Codex cannot be given a session id, so its tmux session starts as new-codex-….
+    from datetime import datetime, timezone
+    lab, device = host
+    lab.env["FAKE_NOW"] = datetime.now(timezone.utc).isoformat()
+    device("new", "codex", "--cwd", str(lab.path), "--resident")
+    agent = eventually(lambda: reports(lab))[0]
+    eventually(lambda: any(name.startswith("new-codex-") for name in running(lab.env)))
+    row = json.loads(lab.cli("list", "--json").stdout)
+    assert row["resident"] is True and running(lab.env) == {row["key"]}, \
+        "the session is renamed after its history key"
+    shown = device("attach", row["key"])
+    eventually(lambda: "COUNT=" in screen(shown, lab.env))
+    assert [r["pid"] for r in reports(lab)] == [agent["pid"]], "attach finds it; no second agent"
+
+
 def test_talking_to_a_session_without_a_kept_agent_is_refused(host):
     lab, _ = host
     for command in (["peek", "h_0123456789"], ["send", "h_0123456789", "hi"], ["approve", "h_0123456789"]):

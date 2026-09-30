@@ -208,6 +208,10 @@ class Manager:
         Only rows that differ from the defaults are listed."""
         env = self.config.environment
         self._running = resident.running(env)
+        if any(name.startswith(resident.NEW_PREFIX + "codex-") for name in self._running):
+            renamed = resident.adopt(env, rows, self._running)
+            self._running = (self._running - set(renamed)) | {resident.session_name(key)
+                                                              for key in renamed.values()}
         by_name = {resident.session_name(row.key): row.key for row in rows} if self._running else {}
         waiting = {by_name[name]: prompts.attention(screen)
                    for name, screen in resident.screens(env, set(by_name) & self._running).items()}
@@ -375,7 +379,12 @@ class Manager:
             raise Missing("Attaching to a session on another host runs there; see remote_argv")
         record = self.resolve_history(query)
         name = resident.session_name(record.key)
-        if name in resident.running(self.config.environment):
+        running = resident.running(self.config.environment)
+        if name not in running and any(n.startswith(resident.NEW_PREFIX) for n in running):
+            # A new Codex agent may be this session under its placeholder name.
+            self.snapshot()
+            running = self._running
+        if name in running:
             plan = resident.attach(self.config, name, record.agent)
             if plan is not None:
                 return plan

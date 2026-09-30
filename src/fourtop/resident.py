@@ -133,6 +133,59 @@ def keep(config: Config, plan: LaunchPlan, name: str | None = None) -> LaunchPla
 
 
 
+NEW_PREFIX = "new-"  # a session started before its agent had a history key (Codex)
+ADOPT_SLACK = 5.0  # seconds a transcript may claim to start before its tmux session
+
+
+def unnamed(env: dict[str, str]) -> list[tuple[str, float, str]]:
+    """Sessions still named ``new-AGENT-…``: (name, created, start directory)."""
+    tmux = tmux_binary(env)
+    result = _tmux(tmux, env, "list-sessions", "-F",
+                   "#{session_name}\t#{session_created}\t#{session_path}") if tmux else None
+    found = []
+    for line in (result.stdout.splitlines() if result and result.returncode == 0 else []):
+        name, _, rest = line.partition("\t")
+        created, _, path = rest.partition("\t")
+        if name.startswith(NEW_PREFIX) and created.isdigit():
+            found.append((name, float(created), path))
+    return found
+
+
+def adopt(env: dict[str, str], rows, names: set[str]) -> dict[str, str]:
+    """Name each ``new-codex-…`` session after the history key its agent wrote.
+
+    Codex cannot be given a session id up front, so a new Codex agent starts under a
+    placeholder and nothing could find it again: no `resident`, no `attention`, and
+    `attach` started a second agent. Once its transcript exists, it is the earliest
+    Codex session in the same directory that began after the tmux session did (and
+    has no agent yet); with two placeholders in one directory, neither is guessed.
+    Returns {old name: key} for the sessions renamed.
+    """
+    from datetime import datetime
+    pending = [item for item in unnamed(env) if item[0].startswith(NEW_PREFIX + "codex-")]
+    paths = [path for _, _, path in pending]
+    renamed = {}
+    for name, created, path in pending:
+        if paths.count(path) != 1:
+            continue
+        candidates = []
+        for row in rows:
+            if row.agent != "codex" or row.cwd != path or session_name(row.key) in names:
+                continue
+            try:
+                started = datetime.fromisoformat(row.started.replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError):
+                continue
+            if started >= created - ADOPT_SLACK:
+                candidates.append((started, row.key))
+        if candidates:
+            key = min(candidates)[1]
+            result = _tmux(tmux_binary(env), env, "rename-session", "-t", f"={name}", session_name(key))
+            if result and result.returncode == 0:
+                renamed[name] = key
+    return renamed
+
+
 # ----- reading and answering an agent without attaching to it ----------------------
 #
 # A phone mostly wants to know what an agent is doing and to say one sentence to it.

@@ -61,6 +61,10 @@
   when git is asked again.
 - The sync trailer carries `attention`, `labels` and `muted` like `resident`, so a
   prompt appearing or a session being named costs a remote panel no full listing.
+- A new Codex agent kept on its host is found again: it starts under a placeholder
+  (Codex takes no session id) and is renamed to its history key once its transcript
+  exists, so its row is `resident`, can need you, and `attach` no longer starts a
+  second agent. Found dispatching Codex to ubuntu.
 - New commands: `peek`, `send`, `approve` and `deny` read and answer an agent kept on
   its host without attaching (`approve`/`deny` press nothing, exit 4, when no
   permission prompt is on screen); `label`, `mute` and `unmute` (a session, or
