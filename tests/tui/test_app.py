@@ -488,13 +488,16 @@ async def test_sessions_agents_started_for_themselves_are_hidden_until_asked():
 
 
 @pytest.mark.asyncio
-async def test_a_tap_selects_and_a_second_tap_opens(tmp_path):
+async def test_a_tap_selects_and_a_second_tap_opens(tmp_path, monkeypatch):
     # On a phone a tap is how you select; opening on the first touch started
     # sessions nobody meant to open. Real clicks, through Textual's dispatch:
     # OptionList's own handler runs too unless prevented, which a direct call to
     # the override never showed.
     import asyncio as _asyncio
     opened = []
+    # Termux's doubled event arrives within milliseconds; a loaded CI runner can take
+    # longer than the real window between two simulated clicks, so the test widens it.
+    monkeypatch.setattr(SessionList, "DUPLICATE_TAP", 1.0)
 
     class Recording(LocalDemo):
         def resume(self, query, cwd=None):
