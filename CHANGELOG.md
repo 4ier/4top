@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 4top 0.2.0a9 — 2026-09-30
+
+Requires session-ls 0.2.4: cheaper repeated scans, the agent's own title for a
+too-short first message, scripted sessions (`claude -p`, `codex exec`) marked so
+Now leaves them out, and task notifications kept out of the latest request.
 
 - A quieter idle panel: ages past the first hour show whole hours, so the list is
   not rebuilt every time some row's minute ticks; a remote refresh that changed

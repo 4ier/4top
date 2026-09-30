@@ -4,7 +4,7 @@ requires-python = ">=3.11"
 
 [[package]]
 name = "4top"
-version = "0.2.0a8"
+version = "0.2.0a9"
 source = { editable = "." }
 dependencies = [
     { name = "session-ls" },
@@ -27,7 +27,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8,<10" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23,<2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.16,<0.17" },
-    { name = "session-ls", specifier = ">=0.2.3,<0.3" },
+    { name = "session-ls", specifier = ">=0.2.4,<0.3" },
     { name = "textual", specifier = ">=8.2.8,<9" },
 ]
 provides-extras = ["dev"]
@@ -246,11 +246,11 @@ wheels = [
 
 [[package]]
 name = "session-ls"
-version = "0.2.3"
+version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/ca/90/a31edc78eb508fd3ce6f135583c0e21fdc8025d6c01e8d0a461b9e6c9d9e/session_ls-0.2.3.tar.gz", hash = "sha256:aa46f73243efece0c0afd8945d96f170b2cd1b1d54cd7d4bfe410e6887a6de65", size = 34689, upload-time = "2026-09-28T23:18:18.427Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f7/29/44bfa69968bff600f3fc961fe22714e6cc57dc182643ea5c264b5b5d4536/session_ls-0.2.4.tar.gz", hash = "sha256:4aa024020155dfe892554c10d7866d40163967822de18a9b03c260c0b1ada3ae", size = 41893, upload-time = "2026-09-30T06:02:19.57Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c3/11/4f002acf35395c2de2146c70a06921caa5be977a40ee7624692a99f84c3d/session_ls-0.2.3-py3-none-any.whl", hash = "sha256:fd7d7760806eca8b8868bbfedb54d1eb665c033bb84fe740bda350623facb569", size = 23150, upload-time = "2026-09-28T23:18:17.455Z" },
+    { url = "https://files.pythonhosted.org/packages/bf/78/c93f795f24943348d745ee2c0d48109f11335d66b3d39c0ed43dd55d0127/session_ls-0.2.4-py3-none-any.whl", hash = "sha256:0a6f4bffe760033f0f6c8c6ad52ac628ceb65f65fd991af8c47574181efdc819", size = 26561, upload-time = "2026-09-30T06:02:18.292Z" },
 ]
 
 [[package]]
