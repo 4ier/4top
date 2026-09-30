@@ -25,6 +25,14 @@ COMMANDS = (
     ("new", "Start an original agent in this terminal"),
     ("resume", "Resume one exact session as a new process"),
     ("attach", "Show a session's agent kept on this host, starting it if needed"),
+    ("peek", "Print the screen of an agent kept on this host"),
+    ("send", "Type a message into an agent kept on this host, then Enter"),
+    ("approve", "Answer yes to the permission prompt on a kept agent's screen"),
+    ("deny", "Answer no to the permission prompt on a kept agent's screen"),
+    ("label", "Name a session (no name clears it)"),
+    ("mute", "Hide a session, or a project, from Now"),
+    ("unmute", "Show a muted session or project again"),
+    ("projects", "Recent project directories on this host, for starting a task"),
     ("doctor", "Read dependency and source diagnostics"),
     ("notify", "Push notifications to a phone through ntfy (opt-in)"),
     ("cloud", "Tasks in cloud sandboxes (E2B): a repository, a ref and a prompt"),
@@ -37,6 +45,9 @@ CLOUD = (
     ("done", "Push the task's work as branch 4top/NAME, keep a snapshot, end the sandbox"),
     ("rm", "Remove a task; refused while its work is not on its branch"),
 )
+# Commands whose last argument is free text, which may follow `--` so that text
+# starting with a dash is not read as an option.
+TEXT_AFTER_DASHES = ("send", "label")
 
 
 def _globals(parser: argparse.ArgumentParser, suppress=False) -> None:
@@ -56,8 +67,9 @@ def parser() -> argparse.ArgumentParser:
     for command, text in COMMANDS:
         sub = commands.add_parser(command, help=text)
         _globals(sub, suppress=True)
-        if command in ("list", "search", "doctor"):
-            sub.add_argument("--json", action="store_true", help="JSON output (list/search: JSON Lines)")
+        if command in ("list", "search", "doctor", "projects"):
+            sub.add_argument("--json", action="store_true",
+                             help="JSON output (list/search/projects: JSON Lines)")
         if command in ("list", "search"):
             sub.add_argument("--agent", choices=("claude", "codex", "pi", "cursor"))
             sub.add_argument("--project", help="Case-insensitive project path substring")
@@ -88,6 +100,7 @@ def parser() -> argparse.ArgumentParser:
             sub.add_argument("--resident", action="store_true",
                              help="Keep the agent in this host's own tmux, so a closed terminal "
                                   "or a dropped link does not end it")
+            sub.add_argument("--prompt", help="The agent's first request")
         if command == "resume":
             sub.add_argument("key", help="Stable key / unique native ID prefix; never a row number")
             sub.add_argument("--cwd", help="Explicit override for a historical working directory")
@@ -133,6 +146,19 @@ def parser() -> argparse.ArgumentParser:
                                        help="Remove it even though its work is not on its branch")
                 if verb in ("new", "ls", "done"):
                     cloud.add_argument("--json", action="store_true")
+        if command in ("peek", "send", "approve", "deny", "label"):
+            sub.add_argument("key", help="Stable key; never a row number")
+        if command == "peek":
+            sub.add_argument("--lines", type=int, default=40, help="How many lines, from the bottom")
+            sub.add_argument("--json", action="store_true")
+        if command == "send":
+            sub.add_argument("text", nargs="?", help="What to type (or after --)")
+            sub.add_argument("--no-enter", action="store_true", help="Type it without pressing Enter")
+        if command == "label":
+            sub.add_argument("name", nargs="?", default="", help="The name; none clears it")
+        if command in ("mute", "unmute"):
+            sub.add_argument("key", nargs="?", help="Stable key; never a row number")
+            sub.add_argument("--project", help="A project directory instead: every session in it")
     return ap
 
 
@@ -359,9 +385,10 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                         f"Directory: {args.cwd}\nThe remote CLI runs with its own configuration.",
                         args.yes)
                 remote = (["new", args.agent, "--cwd", args.cwd] + (["--resident"] if args.resident else [])
+                          + (["--prompt", args.prompt] if args.prompt is not None else [])
                           + (["--", *extra] if extra else []))
                 return _exec(manager.remote_argv(remote))
-            plan = manager.new(args.agent, args.cwd, extra)
+            plan = manager.new(args.agent, args.cwd, extra, args.prompt)
             return _hand_over(manager, manager.keep(plan) if args.resident else plan)
         if command == "cloud":
             return _cloud(manager.config, args)
@@ -404,6 +431,40 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
             if flag == "install":
                 print("\n" + notify.subscribe_help(manager.config.notify_url))
             return 0
+        if command == "peek":
+            screen = manager.screen(args.key, args.lines)
+            if args.json:
+                print(json.dumps(screen, ensure_ascii=False))
+            else:
+                print("\n".join(clean_text(line) for line in screen["lines"]))
+            return 0
+        if command == "send":
+            manager.send(args.key, args.text if args.text is not None else " ".join(extra),
+                         enter=not args.no_enter)
+            return 0
+        if command in ("approve", "deny"):
+            getattr(manager, command)(args.key)
+            return 0
+        if command == "label":
+            manager.label(args.key, args.name or " ".join(extra))
+            return 0
+        if command in ("mute", "unmute"):
+            if bool(args.key) == bool(args.project):
+                raise FourtopError(f"{command} takes a session key or --project DIR", 2)
+            if args.project:
+                manager.mute_project(args.project, command == "mute")
+            else:
+                manager.mute(args.key, command == "mute")
+            return 0
+        if command == "projects":
+            found = manager.projects()
+            for item in found:
+                if args.json:
+                    print(json.dumps(item, ensure_ascii=False))
+                else:
+                    print(f"{_clip(str(item.get('path', '')), 60)}  {item.get('sessions', 0):>4}  "
+                          f"{age(str(item.get('last', '')))}")
+            return 0
         raise FourtopError("Unknown operation", 2)
     finally:
         manager.close()
@@ -415,14 +476,19 @@ def main(argv: list[str] | None = None) -> int:
     if "--" in arguments:
         index = arguments.index("--")
         extra, arguments = tuple(arguments[index + 1:]), arguments[:index]
+    # `--prompt TEXT` whose text starts with a dash would be read as an option; joined
+    # into one word it is always the value.
+    if "--prompt" in arguments[:-1]:
+        index = arguments.index("--prompt")
+        arguments[index:index + 2] = [f"--prompt={arguments[index + 1]}"]
     ap = parser()
     args = ap.parse_args(arguments)
     if args.command == "notify" and args.from_hook:
         # Inside an agent's turn: never an error, never a wait, nothing on stdout.
         from .notify import from_hook
         return from_hook(args.config, args.from_hook, extra)
-    if extra and args.command != "new":
-        ap.error("Only `new` accepts native agent arguments after --")
+    if extra and args.command not in ("new", *TEXT_AFTER_DASHES):
+        ap.error("Only `new` accepts native agent arguments after --; send and label, text")
     try:
         result = execute(args, extra)
         sys.stdout.flush()

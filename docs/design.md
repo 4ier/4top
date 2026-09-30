@@ -18,6 +18,14 @@ session-ls reads from the transcript's end (`activity`, `last_request`, `branch`
 There is no launch record and no ownership marker: a native agent is resumable from
 its transcript alone. `resident` is not a record either; it is the host's tmux
 answering, at the moment of listing, whether an agent for the session runs there.
+`attention` is the same kind of answer: `fourtop.prompts` matches the bottom of such
+an agent's screen (`capture-pane`, one tmux call for all of them) against a small
+table of prompt shapes captured from the real CLIs, each with the keys that answer
+it. `label` and `muted` are the person's own words, kept in `marks.json`
+(`fourtop.marks`). `repo` and `changes` come from `fourtop.gitinfo`: the repository
+is read from `.git` on disk, and git is asked for the changes only for the last
+week's sessions, once per worktree, with the answer cached until the index, HEAD or
+the latest session write there moves, or a minute passes.
 
 `fourtop.agents.Drivers` turns a capability probe into an exact argv. `plan_new`
 preallocates a session identifier when the CLI advertises one, so a new session

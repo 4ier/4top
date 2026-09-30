@@ -33,7 +33,7 @@ native = native or str(uuid.uuid4())
 root_key = {"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR"}[agent]
 root_default = Path.home() / {"codex": ".codex", "claude": ".claude", "pi": ".pi/agent"}[agent]
 root = Path(os.environ.get(root_key, str(root_default)))
-now = "2026-09-24T00:00:00Z"
+now = os.environ.get("FAKE_NOW", "2026-09-24T00:00:00Z")
 text = os.environ.get("FAKE_TITLE", "verify continuity 中文")
 if agent == "codex":
     source = root / "sessions/2026/09/24" / ("rollout-2026-09-24-" + native + ".jsonl")
@@ -84,6 +84,21 @@ print(f"FAKE {agent} PID={os.getpid()} NONCE={identity}", flush=True)
 if "--fail" in args:
     print("INTENTIONAL FAILURE 7", flush=True)
     raise SystemExit(7)
+if os.environ.get("FAKE_SCREEN") and sys.stdin.isatty():
+    # Draw a real CLI's captured prompt and record every key, the way a TUI reads
+    # them (one at a time); the first key answers the prompt and clears it.
+    import termios
+    import tty
+    tty.setcbreak(sys.stdin.fileno(), termios.TCSANOW)
+    print(Path(os.environ["FAKE_SCREEN"]).read_text(encoding="utf-8"), end="", flush=True)
+    report["typed"] = ""
+    while True:
+        character = os.read(sys.stdin.fileno(), 1024).decode("utf-8", "replace")
+        if not character:
+            stop(0, None)
+        report["typed"] += character
+        save()
+        print("\x1b[2J\x1b[HANSWERED " + repr(report["typed"]), flush=True)
 while True:
     report["count"] += 1
     save()

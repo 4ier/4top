@@ -17,7 +17,7 @@ from . import e2b
 from .config import Config, Host
 from .errors import Unavailable
 from .models import ROW_SCHEMA, Session, Snapshot
-from .sync import SYNC_VERSION, SyncState, digest, fingerprint
+from .sync import SYNC_VERSION, SyncState, apply, digest, fingerprint
 
 # BatchMode never prompts, and the ServerAlive pair turns a dead link into an error in
 # about 45 seconds instead of a hang. Rows are repetitive JSON fetched on every refresh,
@@ -126,7 +126,10 @@ def parse_payloads(host: Host, stdout: str) -> tuple[list[dict], dict | None]:
             if (not isinstance(summary, dict) or summary.get("version") != SYNC_VERSION
                     or not isinstance(summary.get("count"), int)
                     or not isinstance(summary.get("digest"), str)
-                    or not isinstance(summary.get("resident", []), list)):
+                    or not isinstance(summary.get("resident", []), list)
+                    or not isinstance(summary.get("attention", {}), dict)
+                    or not isinstance(summary.get("labels", {}), dict)
+                    or not isinstance(summary.get("muted", []), list)):
                 raise Unavailable(f"{host.name}: unreadable sync summary; nothing was trusted")
             continue
         row_from(host, payload, number)  # validate now; a bad row poisons the whole answer
@@ -153,10 +156,21 @@ def row_from(host: Host, payload: dict, number: int = 0) -> Session:
             label=str(payload.get("label") or ""),
             muted=payload.get("muted") is True,
             repo=str(payload.get("repo") or ""),
-            changes=payload.get("changes") if isinstance(payload.get("changes"), dict) else {},
+            changes=changes_from(payload.get("changes")),
             scripted=payload.get("scripted") is True)
     except (KeyError, TypeError, ValueError):
         raise Unavailable(f"{host.name}: row {number} is missing required fields") from None
+
+
+def changes_from(value) -> dict:
+    """A row's working-tree changes, as numbers and a flag whatever the host sent."""
+    if not isinstance(value, dict):
+        return {}
+    result = {name: value[name] for name in ("files", "insertions", "deletions", "untracked")
+              if type(value.get(name)) is int and value[name] >= 0}
+    if isinstance(value.get("dirty"), bool):
+        result["dirty"] = value["dirty"]
+    return result
 
 
 def parse_rows(host: Host, stdout: str) -> list[Session]:
@@ -228,12 +242,9 @@ def remote_snapshot(config: Config, host: Host, sync: SyncState | None = None) -
         sync.supported = True
         merged = dict(sync.payloads) if sync.cursor else {}
         merged.update((str(payload["key"]), payload) for payload in payloads)
-        if "resident" in summary:
-            # An agent that started or exited changed a row the cursor cannot see.
-            running = {str(key) for key in summary["resident"]}
-            merged.update([(key, {**payload, "resident": key in running})
-                           for key, payload in merged.items()
-                           if payload.get("resident", False) != (key in running)])
+        # An agent that started, exited or reached a prompt, or a session the person
+        # named or muted, changed a row the cursor cannot see.
+        apply(merged, summary)
         sync.attach = "resident" in summary
         prints = {key: fingerprint(payload) for key, payload in merged.items()}
         if len(merged) == summary["count"] and digest(prints) == summary["digest"]:

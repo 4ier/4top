@@ -177,6 +177,17 @@ def _record(manager, event: Event):
     return None
 
 
+def _muted(manager, event: Event, record) -> bool:
+    """Muted in marks.json (fourtop.marks), by session or by project, as in Now."""
+    marks = getattr(manager, "marks", None)
+    if marks is None:
+        return False
+    from .gitinfo import repo_of
+    from .marks import muted
+    cwd = (record.cwd if record is not None and record.cwd else "") or event.cwd or ""
+    return muted(marks.load(), record.key if record is not None else "", cwd, repo_of(cwd))
+
+
 def repo_name(cwd: str) -> str:
     """The repository a directory belongs to, so a worktree is named after its repo,
     as the panel names it; the directory's own name outside a repository."""
@@ -251,6 +262,8 @@ def deliver(config: Config, agent: str, payload: dict, manager=None, opener=urll
         if record is not None and (getattr(record, "subagent", False)
                                    or getattr(record, "scripted", False)):
             return False  # started by an agent or a script: nobody is waiting on it
+        if _muted(manager, event, record):
+            return False  # the person hid this session, or its project
         message = compose(event, record, config.notify_name or None)
         digest = hashlib.sha256(message["message"].encode()).hexdigest()[:16]
         with manager.store.lock("notify", timeout=2):

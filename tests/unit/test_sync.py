@@ -158,6 +158,43 @@ def test_an_agent_starting_or_exiting_costs_no_full_fetch(fake, tmp_path):
     assert again.load() and again.attach, "remembered for the next start"
 
 
+@pytest.mark.parametrize("change", [
+    {"attention": "permission"}, {"attention": "question"}, {"label": "the migration"},
+    {"muted": True}])
+def test_a_prompt_a_name_or_a_mute_costs_no_full_fetch(fake, tmp_path, change):
+    # An agent reaching a prompt, or the person naming or muting a session, writes no
+    # transcript: the trailer carries these for every row, like `resident`.
+    from dataclasses import replace
+    host = fake([row("a", "2026-09-28T10:00:00+00:00"), row("b", "2026-09-27T10:00:00+00:00")])
+    sync = SyncState(tmp_path / "venus.json", "me@venus")
+    hosts.remote_snapshot(None, HOST, sync)
+    (field, _), = change.items()
+    unchanged = getattr(host.rows[1], field)
+    for value in (replace(host.rows[1], **change), host.rows[1]):
+        host.rows[1] = value
+        host.calls.clear()
+        snapshot = hosts.remote_snapshot(None, HOST, sync)
+        assert [getattr(item, field) for item in snapshot.rows] == [unchanged, getattr(value, field)]
+        assert len(host.calls) == 1 and "--since" in host.calls[0], "still incremental"
+
+
+def test_a_host_without_these_trailer_fields_keeps_its_rows_as_sent():
+    # An older host has no `attention` in its trailer: rows are not reset to defaults.
+    from fourtop.sync import apply
+    merged = {"a": {"key": "a", "attention": "permission", "label": "x"}}
+    apply(merged, {"resident": []})
+    assert merged["a"]["attention"] == "permission" and merged["a"]["label"] == "x"
+    apply(merged, {"attention": {}, "labels": {"a": "y"}, "muted": ["a"]})
+    assert merged["a"] == {"key": "a", "attention": "", "label": "y", "muted": True}
+
+
+def test_an_unreadable_trailer_field_is_refused(monkeypatch):
+    line = json.dumps({"schema_version": ROW_SCHEMA, "sync": {**trailer([]), "attention": ["a"]}})
+    monkeypatch.setattr(hosts, "run_remote", lambda *a: (0, line + "\n", ""))
+    with pytest.raises(Unavailable, match="unreadable sync summary"):
+        hosts.remote_snapshot(None, HOST, SyncState(None))
+
+
 def test_an_older_host_is_not_asked_to_attach(fake, tmp_path):
     fake([row("a", "2026-09-28T10:00:00+00:00")], syncs=False)
     sync = SyncState(tmp_path / "venus.json", "me@venus")

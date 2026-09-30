@@ -18,10 +18,18 @@ Symlink traversal below those roots and FIFOs/nonregular files are rejected.
 Authentication files are not included in discovery. Full-content search is explicit.
 
 Caches contain titles and project paths and are therefore sensitive. Private state
-contains a local identity, your last selection and, with notifications on, when
-each session was last reported (key, state, a digest of the message), and nothing else: no run IDs, no
+contains a local identity, your last selection, the names and mutes you gave
+sessions (`marks.json`) and, with notifications on, when each session was last
+reported (key, state, a digest of the message), and nothing else: no run IDs, no
 process identity, no environment values, no native argument arrays, no prompt
-arguments, no search bodies and no terminal scrollback.
+arguments, no search bodies and no terminal scrollback. The cache also keeps git's
+last answer about each recent worktree's changes (counts only, `git.json`).
+
+`peek` and `attention` read the screen of an agent kept on its host, the way `tmux
+capture-pane` does; the screen is printed or matched against prompt shapes and never
+stored. `send` types only what you give it into that agent. A `new --prompt` is the
+agent's own argument, so like any command line it is visible to the host's process
+list while the agent runs.
 
 A remote host is reached with the `ssh` you already configured; 4top adds no
 credential store, opens no port and starts no service. The ssh control socket lives
@@ -51,7 +59,7 @@ alone deletes no native transcripts and stops no agent: agents started by 4top a
 ordinary processes in your terminal or in your own multiplexer.
 
 Deleting only `$XDG_CACHE_HOME/4top` removes rebuildable metadata. Removing
-`$XDG_STATE_HOME/4top` loses local identity, the last selection and the ssh control
-socket; history keys change with the identity, so previously copied keys stop
+`$XDG_STATE_HOME/4top` loses local identity, the last selection, your names and mutes
+and the ssh control socket; history keys change with the identity, so previously copied keys stop
 resolving. Removing state never terminates anything. Native store retention and
 your multiplexer's scrollback have their own policies.

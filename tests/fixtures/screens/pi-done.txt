@@ -1,0 +1,40 @@
+orca-titlebar-spinner.ts, pi-goal:.pi/extensions/pi-goal, pi-subagents, pi-subs:src,
+pi-tool-display, pi-working-activity, pi-zentui:zentui
+
+[Themes]
+  catppuccin-mocha
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+|
+| Reply with just OK
+|
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys
+ on` to ~/.tmux.conf and restart tmux.
+
+ OK
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available
+ New version 0.99.1 is available. Run pi update
+ Changelog: https://pi.dev/changelog
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-powerline-footer
+ - pi-zentui
+ - pi-subagents
+ - github.com/4ier/pi-ntfy
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+|
+|
+|
+| deepseek-flash  Deepseek  high
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 4top-capture in OK                              1.4%/1.0M (auto) | ↑4.2k ↓2 c 70.1% R9.9k | $0.001

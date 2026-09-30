@@ -119,7 +119,10 @@ ssh session at all.
   `[agents.NAME] args`) is started in `new-session -A -s KEY`, which also covers two
   devices opening it at the same moment. `new --resident` is the same for a new
   agent; it is named by its preallocated session identifier where the CLI has one,
-  so a later `attach` finds it.
+  so a later `attach` finds it. Codex has none, so a new Codex agent starts as
+  `new-codex-…` and is renamed to its history key once its transcript exists: the
+  earliest Codex session in that directory that began after the tmux session did,
+  and never a guess between two such placeholders in one directory.
 - That server is usually drawn inside another tmux (the panel), so its configuration
   keeps out of the way: no status line, prefix `None` so `C-b` reaches the agent or
   the outer tmux, mouse on, and `window-size latest` so the device used last sets
@@ -142,6 +145,17 @@ ssh session at all.
 - The panel reports an ssh exit of 255 from a host that keeps agents as
   "Disconnected": the agent is still there, and Enter attaches again. `Q` closes
   what this panel has open; a kept agent only loses the view.
+
+- **Reading and answering a kept agent.** `peek`, `send`, `approve` and `deny` run
+  on the host like any other command, through `run_remote`: the panel never types
+  into another machine's tmux itself. `approve`/`deny` read the screen again on the
+  host and press nothing (exit 4) unless a permission prompt is there now. A prompt
+  appearing, a name or a mute writes no transcript, so the sync trailer carries
+  `attention`, `labels` and `muted` for every row, applied like `resident`. An older
+  host sends none of them and its rows are left as sent.
+- **Starting a task.** `new AGENT --cwd DIR --prompt TEXT --resident --yes` goes
+  through `ssh -t` like `attach`; the prompt is the CLI's own positional argument
+  (after `--`), so the agent starts on it in the host's tmux.
 
 What this is not: no supervisor and no restart. An agent that exits or crashes is
 gone, as before, and its transcript is where it can be resumed from.

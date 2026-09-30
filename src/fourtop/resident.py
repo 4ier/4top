@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
 
 from .config import Config
+from .errors import Conflict, Missing
 from .models import LaunchPlan
 from .workspace import MARKER, _has_terminfo, terminal, tmux_binary
 
@@ -129,3 +131,153 @@ def keep(config: Config, plan: LaunchPlan, name: str | None = None) -> LaunchPla
     argv = (*base, "new-session", "-A", "-s", name, "-c", plan.cwd, "--", *command)
     return replace(plan, executable=tmux, argv=argv, environment=env)
 
+
+
+NEW_PREFIX = "new-"  # a session started before its agent had a history key (Codex)
+ADOPT_SLACK = 5.0  # seconds a transcript may claim to start before its tmux session
+
+
+def unnamed(env: dict[str, str]) -> list[tuple[str, float, str]]:
+    """Sessions still named ``new-AGENT-…``: (name, created, start directory)."""
+    tmux = tmux_binary(env)
+    result = _tmux(tmux, env, "list-sessions", "-F",
+                   "#{session_name}\t#{session_created}\t#{session_path}") if tmux else None
+    found = []
+    for line in (result.stdout.splitlines() if result and result.returncode == 0 else []):
+        name, _, rest = line.partition("\t")
+        created, _, path = rest.partition("\t")
+        if name.startswith(NEW_PREFIX) and created.isdigit():
+            found.append((name, float(created), path))
+    return found
+
+
+def adopt(env: dict[str, str], rows, names: set[str]) -> dict[str, str]:
+    """Name each ``new-codex-…`` session after the history key its agent wrote.
+
+    Codex cannot be given a session id up front, so a new Codex agent starts under a
+    placeholder and nothing could find it again: no `resident`, no `attention`, and
+    `attach` started a second agent. Once its transcript exists, it is the earliest
+    Codex session in the same directory that began after the tmux session did (and
+    has no agent yet); with two placeholders in one directory, neither is guessed.
+    Returns {old name: key} for the sessions renamed.
+    """
+    from datetime import datetime
+    pending = [item for item in unnamed(env) if item[0].startswith(NEW_PREFIX + "codex-")]
+    paths = [path for _, _, path in pending]
+    renamed = {}
+    for name, created, path in pending:
+        if paths.count(path) != 1:
+            continue
+        candidates = []
+        for row in rows:
+            if row.agent != "codex" or row.cwd != path or session_name(row.key) in names:
+                continue
+            try:
+                started = datetime.fromisoformat(row.started.replace("Z", "+00:00")).timestamp()
+            except (ValueError, TypeError):
+                continue
+            if started >= created - ADOPT_SLACK:
+                candidates.append((started, row.key))
+        if candidates:
+            key = min(candidates)[1]
+            result = _tmux(tmux_binary(env), env, "rename-session", "-t", f"={name}", session_name(key))
+            if result and result.returncode == 0:
+                renamed[name] = key
+    return renamed
+
+
+# ----- reading and answering an agent without attaching to it ----------------------
+#
+# A phone mostly wants to know what an agent is doing and to say one sentence to it.
+# Attaching takes the whole terminal for that, so these read the agent's screen and
+# type into it through tmux instead. They act only on a session that tmux says runs
+# here now, and never start anything.
+
+# Between screens in one batched capture. Printable on purpose: without a UTF-8
+# locale tmux escapes control characters in what display-message prints.
+SEPARATOR = "@@4top-screen@@ "
+
+
+def find(env: dict[str, str], query: str) -> str:
+    """The running session a key names: exact, or a unique prefix of four or more."""
+    names = running(env)
+    name = session_name(query)
+    if name in names:
+        return name
+    matches = [n for n in names if len(query) >= 4 and n.startswith(name)]
+    if len(matches) > 1:
+        raise Conflict("Identifier is ambiguous; use a complete key")
+    if not matches:
+        raise Missing("No agent for this session runs on this host now")
+    return matches[0]
+
+
+def capture(env: dict[str, str], name: str, history: int = 0) -> str | None:
+    """The session's screen as plain text (tmux strips colours unless asked), plus up
+    to ``history`` lines above it; None when the session is not there."""
+    tmux = tmux_binary(env)
+    args = ["capture-pane", "-p", "-t", f"={name}:"] + (["-S", f"-{history}"] if history else [])
+    result = _tmux(tmux, env, *args) if tmux else None
+    return result.stdout if result and result.returncode == 0 else None
+
+
+def screens(env: dict[str, str], names) -> dict[str, str]:
+    """The screens of several sessions in one tmux call. A session that exited in the
+    meantime ends the batch early; the ones before it are still returned."""
+    names = sorted(names)
+    tmux = tmux_binary(env)
+    if not names or tmux is None:
+        return {}
+    args: list[str] = []
+    for name in names:
+        args += [";"] if args else []
+        args += ["display-message", "-p", SEPARATOR + name, ";", "capture-pane", "-p", "-t", f"={name}:"]
+    result = _tmux(tmux, env, *args)
+    if result is None:
+        return {}
+    found: dict[str, list[str]] = {}
+    current = None
+    for line in result.stdout.splitlines():
+        if line.startswith(SEPARATOR) and line[len(SEPARATOR):] in names:
+            current = found.setdefault(line[len(SEPARATOR):], [])
+        elif current is not None:
+            current.append(line)
+    return {name: "\n".join(lines) for name, lines in found.items()}
+
+
+def paste(env: dict[str, str], name: str, text: str, enter: bool = True) -> bool:
+    """Type ``text`` into the session as one bracketed paste, then Enter.
+
+    A paste arrives as one piece, so a newline inside it does not submit half a
+    message and the agent sees pasted text rather than keystrokes. Claude Code reads
+    an Enter that arrives with the paste as part of it, hence the pause.
+    """
+    tmux = tmux_binary(env)
+    if tmux is None:
+        return False
+    buffer = f"4top-{uuid.uuid4().hex[:8]}"
+    try:
+        loaded = subprocess.run([tmux, "-L", socket(env), "load-buffer", "-b", buffer, "-"],
+                                input=text, capture_output=True, text=True, env=env, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if loaded.returncode != 0:
+        return False
+    pasted = _tmux(tmux, env, "paste-buffer", "-p", "-d", "-b", buffer, "-t", f"={name}:")
+    if not pasted or pasted.returncode != 0:
+        _tmux(tmux, env, "delete-buffer", "-b", buffer)
+        return False
+    if enter:
+        time.sleep(PASTE_SETTLE)
+        return press(env, name, ("Enter",))
+    return True
+
+
+PASTE_SETTLE = 0.3
+
+
+def press(env: dict[str, str], name: str, keys) -> bool:
+    """Press tmux key names (``Enter``, ``Escape``, ``y``) in the session."""
+    tmux = tmux_binary(env)
+    result = _tmux(tmux, env, "send-keys", "-t", f"={name}:", *keys) if tmux else None
+    return bool(result and result.returncode == 0)

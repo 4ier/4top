@@ -227,7 +227,8 @@ A hook returns at once and sends from a detached process with a five-second limi
 so an unreachable server never holds up or fails the agent. Repeats are dropped: the
 same message about a session within ten minutes, or any within twenty seconds unless
 it newly needs you. Sessions started by a script (`claude -p`, `codex exec`) or by
-another agent are not reported, as far as the host's session-ls can tell them apart.
+another agent are not reported, as far as the host's session-ls can tell them apart,
+and neither is a session you muted, or one in a project you muted (`4top mute`).
 
 On a public server the topic is the only secret: anyone who knows it can read the
 messages (host and project names, the request and the agent's last words) and send to
@@ -313,8 +314,27 @@ Design: [docs/e2b-design.md](docs/e2b-design.md).
 4top attach h_<key>                       # the agent in this host's own tmux; started if needed
 4top new codex --resident                 # a new agent kept there too
 4top notify --install                     # push notifications through ntfy (above)
+4top new claude --cwd ~/code/app --prompt 'fix the flaky test' --resident
+4top projects --json                      # recent project directories here, for a picker
+4top peek h_<key>                         # a kept agent's screen, without attaching
+4top send h_<key> 'yes, and add a test'   # type into it, then Enter
+4top approve h_<key>                      # answer its permission prompt yes
+4top deny h_<key>                         # or no
+4top label h_<key> 'nightly migration'    # name a session; no name clears it
+4top mute --project ~/code/bots           # keep a project's sessions out of Now
+4top unmute --project ~/code/bots         # and back
 4top doctor --json
 ```
+
+**Talking to a kept agent.** `peek`, `send`, `approve` and `deny` work on an agent
+kept in this host's own tmux, so a phone can read it and answer it without taking
+over a terminal; with `--host` they run on that host. `peek` reads its screen
+(`--lines N`, `--json`); `send` pastes the text as one piece and presses Enter
+(`--no-enter` does not; text that starts with a dash goes after `--`). `approve`
+and `deny` press what the prompt on screen offers (Claude Code: `1` / Esc; Codex:
+`y` / Esc), and refuse with exit 4, pressing nothing, when no permission prompt is
+there now, so a stale tap never types into an agent that moved on. A session with no
+agent kept here exits 3.
 
 `doctor` also reports `revision`, and `4top --host NAME doctor` reports it for both
 sides, so a remote running older code is visible instead of failing later. Bring a
@@ -327,7 +347,11 @@ may be shortened only when their prefixes are unambiguous (at least four
 characters). Row numbers are never execution targets. `list --json` rows carry
 `schema_version`, `key`, `agent`, `host`, `cwd`, `title`, `started`, `last`,
 `source`, `status`, `can_resume` and `resident` (an agent for it runs in this host's
-own tmux now).
+own tmux now), and what the host says beyond the transcript: `attention`
+(`permission` or `question`: a kept agent's screen shows it waiting on you),
+`label` and `muted` (yours, from `label` and `mute`), `repo` (the repository, the
+same for every worktree of it) and `changes` (`files`, `insertions`, `deletions`,
+`untracked`, `dirty`: git's answer for sessions of the last week).
 
 ## Configuration and privacy
 
@@ -370,8 +394,9 @@ that host's own configuration, because the remote 4top builds the command.
 Agent store roots respect `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and
 `PI_CODING_AGENT_DIR`; an explicit configured root wins. Selected history and
 launch profile must agree. Local state is private: `$XDG_STATE_HOME/4top` holds a
-local identity and your last selection, and `$XDG_CACHE_HOME/4top` holds
-rebuildable metadata. No environment values, prompt text, or transcripts are
+local identity, your last selection, and the names and mutes you gave sessions
+(`marks.json`), and `$XDG_CACHE_HOME/4top` holds rebuildable metadata, including
+git's last answer per worktree. No environment values, prompt text, or transcripts are
 retained. Network access is the ssh you configured, plus the daily update check,
 plus, once you install notifications, one POST to your ntfy topic per message.
 
