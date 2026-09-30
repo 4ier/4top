@@ -62,8 +62,17 @@ def socket(env: dict[str, str]) -> str:
     return env.get("FOURTOP_TMUX_SOCKET") or SOCKET
 
 
+# Where package managers put tmux. A command run over ssh gets the login's minimal
+# PATH (on macOS /usr/bin:/bin:…, without Homebrew), so tmux installed the usual way
+# would not be found, and every agent started from a phone would silently run in
+# its ssh connection instead of being kept on the host.
+TMUX_PLACES = ("/opt/homebrew/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin",
+               "/opt/local/bin", "/snap/bin")
+
+
 def tmux_binary(env: dict[str, str]) -> str | None:
-    return shutil.which("tmux", path=env.get("PATH", os.defpath))
+    return shutil.which("tmux", path=env.get("PATH", os.defpath)) or shutil.which(
+        "tmux", path=os.pathsep.join(TMUX_PLACES))
 
 
 def _has_terminfo(name: str) -> bool:

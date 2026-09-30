@@ -14,6 +14,7 @@ panel's layout.
 """
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import time
@@ -89,6 +90,11 @@ def _prepare(config: Config, tmux: str) -> tuple[list[str], dict[str, str], dict
     # terminal's entry (tmux-256color from the panel, say) refuses to attach at all.
     if env.get("TERM") and not _has_terminfo(env["TERM"]):
         env["TERM"] = terminal()
+    # tmux found outside PATH (see TMUX_PLACES): the agents it keeps get that
+    # directory too, with the tools installed beside it.
+    place = str(Path(tmux).parent)
+    if place not in env.get("PATH", "").split(os.pathsep):
+        env["PATH"] = os.pathsep.join(filter(None, (env.get("PATH"), place)))
     conf = Path(config.state_dir) / "agents.tmux.conf"
     conf.write_text(CONF.format(terminal=terminal()), encoding="utf-8")
     shown = _tmux(tmux, env, "show-environment", "-g")

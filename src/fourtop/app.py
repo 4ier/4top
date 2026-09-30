@@ -472,7 +472,7 @@ class Dispatch(ModalScreen[tuple | None]):
         self.cloud = getattr(getattr(app_.manager.config, "cloud", None), "enabled", False)
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="dialog"):
+        with Vertical(classes="dialog dispatch"):
             yield Static("New task", classes="dialog-title")
             machines = [(s.name, i) for i, s in enumerate(self.sources)]
             if self.cloud:
@@ -499,6 +499,7 @@ class Dispatch(ModalScreen[tuple | None]):
         choice = self.query_one("#host", Select).value
         listing = self.query_one("#projects", OptionList)
         listing.clear_options()
+        listing.add_option(Option(Text("reading recent projects…", "dim"), disabled=True))
         where = self.query_one("#cwd", Input)
         where.value = ""
         if choice == "cloud":
@@ -509,6 +510,7 @@ class Dispatch(ModalScreen[tuple | None]):
         else:
             where.placeholder = "or a directory on that machine"
             found = await self.host_projects(self.sources[choice])
+        listing.clear_options()
         self.projects = list(dict.fromkeys(
             str(item["path"] if isinstance(item, dict) else item) for item in found))[:30]
         listing.add_options([Option(Text.assemble(Path(p).name, ("  " + p, "dim")), id=str(i))
@@ -661,6 +663,7 @@ class FourtopApp(App[tuple | None]):
     .dialog-body { height: auto; max-height: 18; margin-bottom: 1; }
     .dialog Input, .dialog Select { margin-bottom: 1; }
     .dialog OptionList { height: auto; max-height: 20; }
+    .dispatch OptionList { max-height: 8; }  /* the task and Start stay on a phone's screen */
     .buttons { height: auto; align-horizontal: right; margin-top: 1; }
     .buttons Button { min-width: 10; margin-left: 1; }
     .preview-dialog { width: 100; height: 85%; }

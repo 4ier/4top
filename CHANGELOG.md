@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Fixed: over ssh a Mac's PATH lacks Homebrew, so its tmux was not found and an
+  agent started or opened from another device ran in the ssh connection instead of
+  being kept (and could not be peeked, answered or approved). tmux is now also
+  looked for where package managers install it, and `new --resident` says so when
+  there is no tmux at all.
+- The new-task dialog keeps its project list short, so the task and Start fit on a
+  phone's screen.
 - `n` offers "cloud (E2B)" as a machine when `[cloud]` is configured: a repository
   (earlier tasks' first) and a prompt start a cloud task and open its agent.
 - `[notify] name` names the machine in notification titles (default: its host name).
