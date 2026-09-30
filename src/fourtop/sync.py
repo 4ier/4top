@@ -108,13 +108,31 @@ class SyncState:
         self.cursor = ""
         self.supported: bool | None = None  # None until the host has answered once
         self.attach = False  # the host keeps agents in its own tmux (its trailer says so)
+        self._prints: dict[str, tuple[dict[str, Any], str]] = {}  # key -> (row, fingerprint)
 
     def reset(self) -> None:
         self.payloads, self.cursor = {}, ""
 
     def accept(self, payloads: dict[str, dict[str, Any]], cursor: str) -> None:
+        # Most refreshes change nothing: the cache (megabytes for a busy host) is
+        # written only when a row or the cursor did.
+        changed = (cursor != self.cursor or len(payloads) != len(self.payloads)
+                   or any(self.payloads.get(key) is not value and self.payloads.get(key) != value
+                          for key, value in payloads.items()))
         self.payloads, self.cursor = payloads, cursor
-        self.save()
+        if changed:
+            self.save()
+
+    def fingerprints(self, merged: dict[str, dict[str, Any]]) -> dict[str, str]:
+        """Each row's fingerprint, computed again only for rows that are new objects:
+        rows that did not travel or change are the very dicts fingerprinted before."""
+        known = self._prints
+        prints = {}
+        for key, payload in merged.items():
+            seen = known.get(key)
+            prints[key] = seen[1] if seen is not None and seen[0] is payload else fingerprint(payload)
+        self._prints = {key: (merged[key], value) for key, value in prints.items()}
+        return prints
 
     def load(self) -> bool:
         if self.cache is None:

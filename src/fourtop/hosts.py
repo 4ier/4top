@@ -17,7 +17,7 @@ from . import e2b
 from .config import Config, Host
 from .errors import Unavailable
 from .models import ROW_SCHEMA, Session, Snapshot
-from .sync import SYNC_VERSION, SyncState, apply, digest, fingerprint
+from .sync import SYNC_VERSION, SyncState, apply, digest
 
 # BatchMode never prompts, and the ServerAlive pair turns a dead link into an error in
 # about 45 seconds instead of a hang. Rows are repetitive JSON fetched on every refresh,
@@ -246,7 +246,7 @@ def remote_snapshot(config: Config, host: Host, sync: SyncState | None = None) -
         # named or muted, changed a row the cursor cannot see.
         apply(merged, summary)
         sync.attach = "resident" in summary
-        prints = {key: fingerprint(payload) for key, payload in merged.items()}
+        prints = sync.fingerprints(merged)
         if len(merged) == summary["count"] and digest(prints) == summary["digest"]:
             sync.accept(merged, str(summary.get("cursor") or ""))
             return Snapshot(rows_of(host, merged.values()), _issues(host, err, code), scope=host.name)
