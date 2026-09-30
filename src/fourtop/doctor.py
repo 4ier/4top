@@ -11,7 +11,7 @@ from pathlib import Path
 
 from session_ls.api import clean_text
 
-from . import __version__
+from . import __version__, e2b
 from .errors import FourtopError
 
 
@@ -67,14 +67,20 @@ def diagnose(manager) -> dict:
     report["hosts"] = {name: {"ssh": host.ssh, "command": host.command,
                               "refresh_seconds": host.refresh_seconds,
                               "timeout_seconds": host.timeout_seconds}
+                              | ({"e2b": host.e2b} if host.e2b else {})
                        for name, host in config.hosts.items()}
+    if (config.cloud.enabled or any(host.e2b for host in config.hosts.values())) \
+            and e2b.proxy_missing(config):
+        report["issues"].append("E2B sandboxes need websocat on this machine "
+                                "(brew install websocat, or pkg install websocat)")
     if manager.host is not None:
         from .hosts import remote_doctor
         try:
+            manager.wake()
             report["remote"] = remote_doctor(config, manager.host)
         except FourtopError as exc:
             report["issues"].append(str(exc))
-        local, remote = report["revision"], report["remote"].get("revision")
+        local, remote = report["revision"], report.get("remote", {}).get("revision")
         if local and remote and local != remote:
             report["issues"].append(
                 f"{manager.host.name} runs {remote} while this build is {local}: "

@@ -18,6 +18,7 @@ HOST_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
 # only secret, so it is random and long.
 NOTIFY_URL_RE = re.compile(r"https?://[^/\s?#@]+(?:/[^/\s?#]+)*/[-_A-Za-z0-9]{1,64}\Z")
 NOTIFY_EVENTS = ("needs-you", "done", "error")
+SANDBOX_ID_RE = re.compile(r"[a-z0-9]{1,64}\Z")
 
 
 def _absolute(value: str) -> Path:
@@ -48,6 +49,7 @@ class Host:
     refresh_seconds: float = 15.0
     timeout_seconds: float = 10.0
     ad_hoc: bool = False
+    e2b: str = ""  # an E2B sandbox ID; ssh then goes through its websocket
 
 
 def _host(name: str, options: dict, ad_hoc: bool = False) -> Host:
@@ -55,11 +57,17 @@ def _host(name: str, options: dict, ad_hoc: bool = False) -> Host:
         raise FourtopError("Host names must be short and start with a letter or digit", 2)
     if not isinstance(options, dict):
         raise FourtopError(f"[hosts.{name}] must be a TOML table", 2)
-    permitted = {"ssh", "command", "refresh_seconds", "timeout_seconds"}
+    permitted = {"ssh", "e2b", "command", "refresh_seconds", "timeout_seconds"}
     if set(options) - permitted:
         raise FourtopError(f"Unknown option in [hosts.{name}]: "
                            + ", ".join(sorted(set(options) - permitted)), 2)
-    target = options.get("ssh")
+    sandbox = options.get("e2b", "")
+    if "e2b" in options:
+        if "ssh" in options:
+            raise FourtopError(f"[hosts.{name}] takes ssh or e2b, not both", 2)
+        if not isinstance(sandbox, str) or not SANDBOX_ID_RE.match(sandbox):
+            raise FourtopError(f"Invalid hosts.{name}.e2b; expected a sandbox ID", 2)
+    target = options.get("ssh", f"user@{sandbox}" if sandbox else None)
     # A leading dash would be read as an ssh option, and whitespace cannot be an
     # argv element on the remote. Both are refused rather than quoted and guessed.
     if (not isinstance(target, str) or not target or "\x00" in target or target.startswith("-")
@@ -71,7 +79,36 @@ def _host(name: str, options: dict, ad_hoc: bool = False) -> Host:
         raise FourtopError(f"Invalid hosts.{name}.command; expected one executable path", 2)
     return Host(name, target, command,
                 _number(options, "refresh_seconds", 15.0, 1.0),
-                _number(options, "timeout_seconds", 10.0, 0.1), ad_hoc)
+                _number(options, "timeout_seconds", 10.0, 0.1), ad_hoc, sandbox)
+
+
+@dataclass(frozen=True)
+class Cloud:
+    """[cloud]: cloud tasks on E2B (fourtop.cloud). The caps are the point: a task's
+    sandbox never runs longer than ``max_minutes``, and no task starts when today's
+    spending plus the new task's worst case would pass ``daily_budget_usd``."""
+    template: str = "4top"  # an E2B template name, optionally name:tag
+    max_minutes: float = 60.0  # E2B's Hobby plan refuses more than an hour
+    daily_budget_usd: float = 5.0
+    keep_snapshot_days: float = 7.0  # a finished task's snapshot; 0 keeps none
+    # The section is present: the panel then lists live cloud tasks beside the hosts.
+    # Without it the panel never asks E2B anything (a key may be for other work).
+    enabled: bool = False
+
+
+def _cloud(options: dict | None) -> Cloud:
+    if options is None:
+        return Cloud()
+    permitted = {"template", "max_minutes", "daily_budget_usd", "keep_snapshot_days"}
+    if set(options) - permitted:
+        raise FourtopError("Unknown option in [cloud]: " + ", ".join(sorted(set(options) - permitted)), 2)
+    template = options.get("template", Cloud.template)
+    if not isinstance(template, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]+)?",
+                                                         template):
+        raise FourtopError("cloud.template must be an E2B template name", 2)
+    return Cloud(template, _number(options, "max_minutes", Cloud.max_minutes, 1.0),
+                 _number(options, "daily_budget_usd", Cloud.daily_budget_usd, 0.0),
+                 _number(options, "keep_snapshot_days", Cloud.keep_snapshot_days, 0.0), True)
 
 
 @dataclass
@@ -97,6 +134,7 @@ class Config:
     update_check: bool = True  # one daily request to PyPI's index; see fourtop.update
     notify_url: str = ""  # "": no push notifications; see fourtop.notify
     notify_events: tuple[str, ...] = NOTIFY_EVENTS
+    cloud: Cloud = field(default_factory=Cloud)
 
     def root(self, agent: str) -> Root:
         return next(root for root in self.roots if root.agent == agent)
@@ -132,7 +170,7 @@ class Config:
                 raise FourtopError("Explicit configuration file was not found", 2) from None
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise FourtopError(f"Cannot read configuration: {type(exc).__name__}", 2) from None
-        allowed = {"ui", "history", "agents", "hosts", "notify"}
+        allowed = {"ui", "history", "agents", "hosts", "notify", "cloud"}
         if set(data) - allowed:
             raise FourtopError("Unknown configuration section: " + ", ".join(sorted(set(data) - allowed)), 2)
         for key in allowed:
@@ -198,4 +236,5 @@ class Config:
                    _number(history, "preview_max_lines", 200, 1, True), color, str(config_file),
                    {name: _host(name, options) for name, options in hosts.items()},
                    agent_args, layout, _number(ui, "rows_per_host", 0, 0, True), update_check,
-                   notify_url, tuple(dict.fromkeys(events)))
+                   notify_url, tuple(dict.fromkeys(events)),
+                   _cloud(data.get("cloud")))

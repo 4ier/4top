@@ -25,6 +25,30 @@
   scripted and subagent sessions stay quiet. Files are backed up before the first
   change and `--uninstall` removes exactly what was added. `--test` sends a test;
   `--agent NAME` limits install or uninstall to some agents.
+- **Cloud tasks on E2B**, the overflow for when the home machines are asleep or
+  busy: `4top cloud new AGENT PROMPT --repo URL --ref REF` starts from a repository
+  URL alone, so a tablet can start one. The sandbox clones the repository itself,
+  with a GitHub token passed for that one command and never written down. The agent
+  runs in the sandbox's own agent tmux, and `4top cloud done` pushes branch
+  `4top/NAME` (`--pr` opens a pull request), keeps a snapshot for
+  `keep_snapshot_days`, and kills the sandbox. `ls`, `open`, `pause` and `rm` do the
+  rest, and `rm` refuses to throw away work that is not on the branch.
+- **Caps on cloud cost.** A sandbox never runs past `[cloud] max_minutes` (default
+  60, the most E2B's Hobby plan allows); at the deadline it pauses and keeps its
+  work. A task that could take today's spending past `daily_budget_usd` (default $5)
+  is refused before anything is created. Spending is read from E2B's own lifecycle
+  events, so it counts every device, and it is shown as an estimate from E2B's
+  published prices. A paused sandbox cannot be woken by traffic; only an action you
+  take wakes it.
+- Credentials are passed to each start and never baked into a snapshot, which is
+  taken after the agent stops and its credentials are removed. The E2B key never
+  enters a sandbox, and the agents' settings there are merged into, not replaced.
+- `[hosts.NAME] e2b = "SANDBOX_ID"` reaches a sandbox as a host (ssh through its
+  websocket, `websocat` needed). Refreshing never wakes a paused one, and opening a
+  row runs `4top attach` there like on any host that keeps agents. With a `[cloud]`
+  section the panel lists live tasks as sources of their own, and each one's
+  `Snapshot.cloud` carries its state, cost so far and lifetime left.
+  Verified against real sandboxes, as described in docs/e2b-design.md.
 
 ## 4top 0.2.0a8 — 2026-09-30
 

@@ -234,6 +234,69 @@ messages (host and project names, the request and the agent's last words) and se
 it. Tapping a notification opens ntfy, not Termux: ntfy opens links, and Termux
 registers no link that would open it (only a broadcast to an automation app such as
 Tasker could).
+## Cloud tasks (E2B)
+
+The home machines do the work; when they are asleep or busy, a task can go to the
+cloud: an [E2B](https://e2b.dev) sandbox of its own, started from anywhere,
+including a tablet, since it needs only a repository URL.
+
+```sh
+4top cloud new claude "fix the flaky retry test" --repo 4ier/app --ref main
+4top cloud ls                      # state, cost so far, lifetime left, today's spending
+4top cloud open app                # watch or talk to its agent
+4top cloud done app --pr           # push branch 4top/app, open a pull request, end the sandbox
+4top cloud pause app
+4top cloud rm app                  # refused while its work is not on 4top/app; --discard
+```
+
+A task is a repository, a ref and a prompt. The sandbox clones the repository
+itself, on a new branch `4top/NAME`, and the agent starts on the prompt in the
+sandbox's own agent tmux, as on any host that keeps agents. It works with nobody
+attached, and Enter on its row in the panel attaches with `4top attach`. Its
+outcome is the pushed branch. `done` commits what the agent left, pushes it, keeps
+a snapshot of the sandbox for `keep_snapshot_days`, and kills the sandbox. Run
+inside a clone, `new` defaults to that clone's origin and branch *as pushed*;
+what is only on the device does not travel.
+
+Costs have caps. A sandbox never runs past `max_minutes`; at the deadline it
+pauses, with its work kept, and only `done` or `rm` may wake it after that. A task
+that could take today's spending past `daily_budget_usd` is refused before anything
+is created. Spending is read from E2B's own record of when each 4top sandbox ran,
+from every device, priced at E2B's published rates ($0.000014 per vCPU-second,
+$0.0000045 per GiB-second, as read on 2026-09-30). That makes it an estimate: E2B's
+invoice is the authority. A paused sandbox cannot be woken by traffic, so a refresh
+never costs anything. Only an action you take, such as opening it, wakes it.
+
+```toml
+[cloud]                   # its presence also lists live tasks in the panel
+template = "4top"         # built from contrib/e2b
+max_minutes = 60
+daily_budget_usd = 5.0
+keep_snapshot_days = 7
+```
+
+Credentials come from the device that starts the task and go to that task only.
+They are an E2B key (`E2B_API_KEY`, or `e2b auth login`), a GitHub token (`GH_TOKEN`,
+`GITHUB_TOKEN` or `gh auth token`) and the agent's own. For Claude that is
+`CLAUDE_CODE_OAUTH_TOKEN` from `claude setup-token` (or
+`~/.config/claude-code/oauth-token`) or `ANTHROPIC_API_KEY`; for Codex,
+`OPENAI_API_KEY` or `auth.json`. The GitHub token is handed to git for the clone and
+the push and never written down. The agent's credentials live in its process only,
+and `done` stops the agent and deletes them before the snapshot. The E2B key never
+enters a sandbox. The ssh public key is how the device gets in, and `websocat` is
+needed here (`brew install websocat`, `pkg install websocat`). In a sandbox the
+agent runs without asking before each command; the sandbox holds nothing but the
+task.
+
+A sandbox can also be pinned as a host. Refreshing never wakes it, and opening a
+row wakes it for the rest of its lifetime:
+
+```toml
+[hosts.scratch]
+e2b = "SANDBOX_ID"
+```
+
+Design: [docs/e2b-design.md](docs/e2b-design.md).
 
 ## Command line
 
