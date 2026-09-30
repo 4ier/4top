@@ -43,6 +43,7 @@ def project(cwd: str) -> str:
 
 
 AWAY_REFRESH = 60.0
+NOW_LIMIT = 40  # rows of "this week" before the rest is left to search
 HOLD_ORDER = 3.0  # seconds after an input during which rows do not move
 
 
@@ -55,26 +56,58 @@ def when(last: str) -> str:
 
 STALE_WORKING = 600  # a turn with no write for this long has stopped, not paused
 RECENT = 86400  # older sessions are history: no state is worth a badge
-STATE_STYLE = {"⟳ working": "bold cyan", "▶ your turn": "bold magenta",
-               "✗ stopped": "bold red", "active now": "bold yellow", "running": "bold green"}
+STATE_STYLE = {"‼ needs you": "bold reverse red", "⟳ working": "bold cyan",
+               "✓ done": "bold green", "✗ stopped": "bold red", "running": "bold cyan",
+               "active now": "bold yellow"}
+NOW_DAYS = 7  # the Now view: what happened this week, and anything still running
+
+
+def seconds_since(last: str) -> float | None:
+    try:
+        return (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds()
+    except (TypeError, ValueError):
+        return None
 
 
 def state(row: Session) -> str:
-    """What the session is doing, as far as its transcript and its host say."""
-    try:
-        seconds = (datetime.now(timezone.utc) - datetime.fromisoformat(row.last)).total_seconds()
-    except (TypeError, ValueError):
-        seconds = None
+    """What the session is doing, as far as its transcript and its host say.
+
+    "done" used to read "your turn": on one day's real sessions, none of eight such
+    turns asked the person anything, they reported finished work. A session that is
+    blocked on the person is named by its host, which reads the agent's screen.
+    """
+    if getattr(row, "attention", ""):
+        return "‼ needs you"
+    seconds = seconds_since(row.last)
     if row.resident:
         # Its host says the agent is running: a long tool call is silence, not a stop.
-        return {"working": "⟳ working", "waiting": "▶ your turn"}.get(row.activity, "running")
+        return {"working": "⟳ working", "waiting": "✓ done"}.get(row.activity, "running")
     if seconds is None or seconds > RECENT:
         return ""
     if row.activity == "working":
         return "⟳ working" if seconds < STALE_WORKING else "✗ stopped"
     if row.activity == "waiting":
-        return "▶ your turn"
+        return "✓ done"
     return "active now" if seconds < 60 else ""
+
+
+URGENCY = (("‼ needs you", ("‼ needs you",)), ("✓ done", ("✓ done",)),
+           ("⟳ working", ("⟳ working", "running", "active now")), ("✗ stopped", ("✗ stopped",)),
+           ("· this week", ("",)))
+
+
+def repo_name(row: Session) -> str:
+    """The project a row belongs to: its repository, so worktrees of one repo are one."""
+    repo = getattr(row, "repo", "") or ""
+    return Path(repo).name if repo else project(row.cwd)
+
+
+def changes_text(row: Session) -> str:
+    changes = getattr(row, "changes", None) or {}
+    files = changes.get("files") or 0
+    if not files:
+        return ""
+    return f"{files}f +{changes.get('insertions', 0)} −{changes.get('deletions', 0)}"
 
 
 def first_line(title: str) -> str:
@@ -343,6 +376,165 @@ class ProjectPicker(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class Ask(ModalScreen[str | None]):
+    """One line of text: a reply to an agent, a session's name."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, heading: str, placeholder: str = "", initial: str = "", note: str = ""):
+        super().__init__()
+        self.heading, self.placeholder, self.initial, self.note = heading, placeholder, initial, note
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static(plain(self.heading), classes="dialog-title")
+            if self.note:
+                yield Static(plain(self.note, multiline=True), classes="dialog-body")
+            yield Input(value=self.initial, placeholder=self.placeholder, id="answer")
+
+    def on_mount(self):
+        self.query_one("#answer", Input).focus()
+
+    @on(Input.Submitted, "#answer")
+    def submitted(self, event: Input.Submitted):
+        self.dismiss(event.value)
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
+class Peek(ModalScreen[None]):
+    """The agent's screen as it is now, and a line to answer it, without taking over
+    the terminal: on a phone, most visits are "what is it doing" and one sentence."""
+
+    BINDINGS = [("escape", "close", "Close")]
+
+    def __init__(self, app_, source, row: Session):
+        super().__init__()
+        self.app_, self.source, self.row = app_, source, row
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog preview-dialog"):
+            yield Static(plain(f"{self.row.host} · {first_line(self.row.label or self.row.title)[:60]}"),
+                         id="peek-title", classes="dialog-title")
+            with VerticalScroll(id="preview-scroll"):
+                yield Static("Reading the agent's screen…", id="peek-body")
+            yield Input(placeholder="reply (Enter sends) · y approve · d deny · Esc close",
+                        id="peek-reply")
+
+    async def on_mount(self):
+        self.query_one("#peek-reply", Input).focus()
+        await self.load()
+        self.set_interval(2.0, self.load)
+
+    async def load(self):
+        try:
+            text = await asyncio.to_thread(self.app_.host_call, self.source, "peek", self.row)
+        except (FourtopError, OSError, ValueError) as exc:
+            text = str(exc)
+        self.query_one("#peek-body", Static).update(plain(text, multiline=True))
+        self.call_after_refresh(self.query_one("#preview-scroll", VerticalScroll).scroll_end,
+                                animate=False)
+
+    @on(Input.Submitted, "#peek-reply")
+    async def submitted(self, event: Input.Submitted):
+        text = event.value.strip()
+        if not text:
+            return
+        await self.app_.run_host_call(self.source, "send", self.row, text,
+                                      done=f"Sent to {self.row.host}.")
+        event.input.value = ""
+        await self.load()
+
+    def on_key(self, event) -> None:
+        if isinstance(self.focused, Input) and self.query_one("#peek-reply", Input).value:
+            return  # letters are a reply being typed
+        if event.key in ("y", "d"):
+            event.stop()
+            name = "approve" if event.key == "y" else "deny"
+            self.run_worker(self.app_.run_host_call(self.source, name, self.row, done=f"{name}d."))
+
+    def action_close(self):
+        self.dismiss(None)
+
+
+class Dispatch(ModalScreen[tuple | None]):
+    """Start a task: a machine, one of its recent projects, an agent and what to do.
+    It starts kept on its host, so the phone can walk away at once."""
+
+    BINDINGS = [("escape", "cancel", "Cancel")]
+
+    def __init__(self, app_, sources, preferred: int = 0):
+        super().__init__()
+        self.app_, self.sources, self.preferred = app_, sources, preferred
+        self.projects: list[str] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Static("New task", classes="dialog-title")
+            yield Select([(s.name, i) for i, s in enumerate(self.sources)],
+                         value=self.preferred, allow_blank=False, id="host")
+            yield OptionList(id="projects")
+            yield Input(placeholder="or a directory on that machine", id="cwd")
+            yield Select([(agent, agent) for agent in ("claude", "codex", "pi")],
+                         value="claude", allow_blank=False, id="agent")
+            yield Input(placeholder="what to do (voice input works here)", id="prompt")
+            yield Static("", id="form-error")
+            with Horizontal(classes="buttons"):
+                yield Button("Cancel", id="cancel")
+                yield Button("Start", id="start", variant="primary")
+
+    async def on_mount(self):
+        await self.load_projects()
+
+    @on(Select.Changed, "#host")
+    async def host_changed(self):
+        await self.load_projects()
+
+    async def load_projects(self):
+        source = self.sources[self.query_one("#host", Select).value]
+        listing = self.query_one("#projects", OptionList)
+        listing.clear_options()
+        try:
+            found = await asyncio.to_thread(self.app_.host_call, source, "projects")
+        except (FourtopError, OSError, ValueError, AttributeError):
+            # An older host: offer the directories its sessions ran in.
+            seen: dict[str, int] = {}
+            for row in source.snapshot.rows[:400]:
+                seen.setdefault(getattr(row, "repo", "") or row.cwd, 0)
+            found = [{"path": path} for path in seen if path]
+        self.projects = [str(item["path"] if isinstance(item, dict) else item) for item in found][:30]
+        listing.add_options([Option(Text.assemble(Path(p).name, ("  " + p, "dim")), id=str(i))
+                             for i, p in enumerate(self.projects)])
+        if self.projects:
+            listing.highlighted = 0
+            self.query_one("#cwd", Input).value = self.projects[0]
+
+    @on(OptionList.OptionHighlighted, "#projects")
+    def picked(self, event):
+        self.query_one("#cwd", Input).value = self.projects[int(event.option.id)]
+
+    @on(Input.Submitted, "#prompt")
+    def submitted(self):
+        self.query_one("#start", Button).press()
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed):
+        if event.button.id == "cancel":
+            self.dismiss(None)
+            return
+        cwd = self.query_one("#cwd", Input).value.strip()
+        prompt = self.query_one("#prompt", Input).value.strip()
+        if not cwd or not prompt:
+            self.query_one("#form-error", Static).update("A directory and a task are required.")
+            return
+        self.dismiss((self.query_one("#host", Select).value, str(self.query_one("#agent", Select).value),
+                      cwd, prompt))
+
+    def action_cancel(self):
+        self.dismiss(None)
+
+
 class SessionList(OptionList):
     """The list itself, with two changes for touch screens and wheels.
 
@@ -412,7 +604,11 @@ class FourtopApp(App[tuple | None]):
         Binding("right_square_bracket", "page(1)", "Next page"),
         Binding("left_square_bracket", "page(-1)", "Previous page"),
         Binding("right", "stage", "Agent"), Binding("f", "fold", "Fold"),
-        Binding("a", "subagents", "Subagents"),
+        Binding("A", "subagents", "Subagents"), Binding("g", "toggle_view", "Machines/Now"),
+        Binding("v", "peek", "Peek"), Binding("c", "reply", "Reply"),
+        Binding("y", "approve", "Approve"), Binding("d", "deny", "Deny"),
+        Binding("R", "rename", "Rename"), Binding("x", "mute", "Mute"),
+        Binding("X", "mute_project", "Mute project"),
         Binding("ctrl+f", "full_search", "Full content"), Binding("r", "refresh", "Refresh"),
         Binding("question_mark", "help", "Help"),
     ]
@@ -461,6 +657,9 @@ class FourtopApp(App[tuple | None]):
         self._placed: str | None = None
         self.project_filter: str | None = None
         self.show_subagents = False
+        self.view = getattr(manager.config, "view", "now") if not manager.demo else "machines"
+        if len(managers) == 1 and self.view == "now" and manager.remote:
+            self.view = "machines"  # --host: one machine, its own pages
         self.update_notice = None
         self._away = False
         self._last_input = 0.0
@@ -664,7 +863,7 @@ class FourtopApp(App[tuple | None]):
             rows = [row for row in rows if project(row.cwd) == self.project_filter]
         if self.show_subagents:
             return rows
-        return [row for row in rows if not row.subagent]
+        return [row for row in rows if not row.subagent and not row.scripted]
 
     def page_sizes(self, visible: dict[int, list[Session]]) -> dict[int, int]:
         """Rows per machine. A machine with few sessions takes only what it needs and
@@ -709,6 +908,18 @@ class FourtopApp(App[tuple | None]):
             return
         listing = self.query_one("#list", OptionList)
         width = max(20, (listing.size.width or self.size.width) - 2)
+        layout, rows = (self._now_layout(width) if self.view == "now"
+                        else self._machines_layout(width))
+        signature = (width, self.view, tuple(
+            (kind, key, value.plain) if kind == "h" else (kind, key, value) if kind == "e" else
+            (kind, key, value.title, when(value.last), value.cwd, value.agent, value.can_resume,
+             key in self.opened, self.busy.get(key), state(value), value.last_request, value.branch,
+             getattr(value, "label", ""), changes_text(value), value.resident)
+            for kind, key, value in layout))
+        self._render_layout(listing, width, layout, rows, signature, refreshed)
+
+    def _machines_layout(self, width: int):
+        """One section per machine, each with its own page."""
         every = {index: self._visible(source) for index, source in enumerate(self.sources)}
         sizes = self.page_sizes(every)
         layout, rows = [], {}
@@ -730,11 +941,48 @@ class FourtopApp(App[tuple | None]):
                 tag = f"{source.name}:{row.key}"
                 rows[tag] = (source, row)
                 layout.append(("r", tag, row))
-        signature = (width, tuple(
-            (kind, key, value.plain) if kind == "h" else (kind, key, value) if kind == "e" else
-            (kind, key, value.title, when(value.last), value.cwd, value.agent, value.can_resume,
-             key in self.opened, self.busy.get(key), state(value), value.last_request, value.branch)
-            for kind, key, value in layout))
+        return layout, rows
+
+    def _now_layout(self, width: int):
+        """Every machine in one list, most urgent first: what needs the person, what
+        just finished, what is working, what stopped, then the rest of the week. A
+        search reaches the whole history instead."""
+        searching = bool(query_terms(self.query_one("#query", Input).value, tolerant=True)) or any(
+            source.full_keys is not None for source in self.sources)
+        groups: dict[str, list] = {name: [] for name, _ in URGENCY}
+        for source in self.sources:
+            for row in self._visible(source):
+                badge = state(row)
+                recent = (seconds_since(row.last) or 0) < NOW_DAYS * 86400
+                if not searching and (getattr(row, "muted", False)
+                                      or not (recent or row.resident or badge == "‼ needs you")):
+                    continue
+                group = next(name for name, badges in URGENCY if badge in badges)
+                groups[group].append((source, row))
+        layout, rows = [], {}
+        loading = [s.name for s in self.sources if not s.loaded]
+        for index, (name, _) in enumerate(URGENCY):
+            members = sorted(groups[name], key=lambda pair: pair[1].last, reverse=True)
+            if not members:
+                continue
+            shown = members if name != "· this week" or searching else members[:NOW_LIMIT]
+            header = Text.assemble((name, STATE_STYLE.get(name, "bold")), (f" · {len(members)}", "dim"))
+            layout.append(("h", f"g{index}", header))
+            for source, row in shown:
+                tag = f"{source.name}:{row.key}"
+                rows[tag] = (source, row)
+                layout.append(("r", tag, row))
+            if len(shown) < len(members):
+                layout.append(("e", f"more{index}", f"{len(members) - len(shown)} more · / searches everything"))
+        if not layout:
+            layout.append(("e", "empty", "loading…" if loading else
+                           "nothing this week · / searches everything · g shows every machine"))
+        stale = [s for s in self.sources if s.stale]
+        for source in stale:
+            layout.append(("e", f"stale{source.name}", f"{source.name}: unreachable, showing its last rows"))
+        return layout, rows
+
+    def _render_layout(self, listing, width, layout, rows, signature, refreshed):
         if refreshed and signature != self._signature and self._holding():
             # Sessions at work move to the top as they write. Moving rows under a
             # finger or a key press changes what it lands on, so a reorder waits
@@ -792,34 +1040,43 @@ class FourtopApp(App[tuple | None]):
 
     def _row(self, row: Session, tag: str, width: int) -> Text:
         opened = tag in self.opened
-        title = first_line(row.title)
+        label = getattr(row, "label", "") or ""
+        title = first_line(label or row.title)
         head = Text()
         # ● open in this panel; ○ running on its host, not shown here.
         head.append("● " if opened else "○ " if row.resident else "  ", style="bold green")
-        head.append(title or "(untitled)", style="bold" if opened else "" if title else "dim italic")
+        head.append(title or "(untitled)",
+                    style="bold" if opened or label else "" if title else "dim italic")
         head.truncate(width, overflow="ellipsis")
         foot = Text("    ")
         busy = self.busy.get(tag)
         if busy:
             foot.append(busy + " · ", style="bold yellow")
-        label = state(row)
-        if label:
-            foot.append(label, style=STATE_STYLE[label])
+        badge = state(row)
+        # In the Now view the group header already says the state; repeating it on
+        # every row spent the width the project name needed.
+        if badge and (self.view != "now" or badge == "active now"):
+            foot.append(badge, style=STATE_STYLE[badge])
             foot.append(" · ", style="dim")
         recent = when(row.last)
-        tail = ("" if label == "active now" else recent) + (" · read-only" if not row.can_resume else "")
-        # What must survive a narrow screen: the state and the time. The project and
-        # then the branch give way to them.
+        changed = changes_text(row)
+        tail = ("" if badge == "active now" else recent) + (" · read-only" if not row.can_resume else "")
+        # What must survive a narrow screen: the state, the time and what changed. The
+        # host, project and branch give way to them.
+        where = (f"{row.host} · " if self.view == "now" and len(self.sources) > 1 else "") + row.agent
         branch = row.branch if row.branch not in ("", "main", "master") else ""
-        room = width - foot.cell_len - len(row.agent) - len(tail) - 6
-        name = Text(project(row.cwd) + (f" · {branch}" if branch else ""))
+        room = width - foot.cell_len - len(where) - len(tail) - len(changed) - 9
+        name = Text(repo_name(row) + (f" · {branch}" if branch else ""))
         name.truncate(max(4, room), overflow="ellipsis")
-        foot.append(f"{row.agent} · {name.plain}" + (" · " if tail else ""), style="dim")
+        foot.append(f"{where} · {name.plain} · ", style="dim")
+        if changed:
+            foot.append(changed, style="yellow")
+            foot.append(" · ", style="dim")
         foot.append(tail, style="dim")
         foot.truncate(width, overflow="ellipsis")
         lines = [head, foot]
         request = first_line(row.last_request)
-        if request and request[:40] != title[:40]:
+        if request and request[:40] != first_line(row.title)[:40]:
             # The latest request says what the session is doing now; the title only
             # says how it began, which a day later is rarely enough.
             last = Text("    › " + request, style="dim italic")
@@ -901,8 +1158,13 @@ class FourtopApp(App[tuple | None]):
         ident = self._highlighted_id() or ""
         if ident in self._rows:
             return self._rows[ident][0]
-        if ident[:2] in ("h:", "e:"):
+        if ident[:2] in ("h:", "e:") and ident[2:].isdigit():
             return self.sources[int(ident[2:])]
+        # A group header in the Now view: the source of the row under it.
+        index = self._ids.index(ident) if ident in self._ids else -1
+        for later in self._ids[index + 1:]:
+            if later in self._rows:
+                return self._rows[later][0]
         return self.sources[0]
 
     @on(OptionList.OptionHighlighted, "#list")
@@ -925,6 +1187,84 @@ class FourtopApp(App[tuple | None]):
         source.collapsed = not source.collapsed
         self._following_top = not any(not s.collapsed and self._visible(s) for s in self.sources)
         self.render_list()
+
+
+    # ----- talking to a session on its host (peek, reply, approve, name, mute) ------
+
+    def host_call(self, source, name: str, *args):
+        """Call a host capability through the source's manager (runs in a thread)."""
+        method = getattr(source.manager, name, None)
+        if method is None:
+            raise FourtopError(f"{source.name}: this 4top cannot {name} yet; update it", 2)
+        return method(*args)
+
+    async def run_host_call(self, source, name: str, *args, done: str = ""):
+        try:
+            await asyncio.to_thread(self.host_call, source, name, *args)
+        except (FourtopError, OSError, ValueError) as exc:
+            self.set_status(str(exc))
+            return False
+        if done:
+            self.set_status(done)
+        self.run_worker(self.refresh_rows())
+        return True
+
+    def _row_and_source(self):
+        row = self.current()
+        return (self.current_source(), row) if row else (None, None)
+
+    def action_toggle_view(self):
+        self.view = "machines" if self.view == "now" else "now"
+        self.selected_key, self._following_top, self._signature = None, True, None
+        self.set_status(f"{'Every machine, its own pages' if self.view == 'machines' else 'Now: most urgent first'} · g switches")
+        self.render_list()
+
+    def action_peek(self):
+        source, row = self._row_and_source()
+        if row:
+            self._modal(Peek(self, source, row))
+
+    def action_reply(self):
+        source, row = self._row_and_source()
+        if row:
+            self.push_screen(Ask(f"Reply to {first_line(row.label or row.title)[:40]}",
+                                 "what to tell the agent (Enter sends)"),
+                             lambda text: self.run_worker(self.run_host_call(
+                                 source, "send", row, text, done=f"Sent to {row.host}."))
+                             if text and text.strip() else None)
+
+    def action_approve(self):
+        source, row = self._row_and_source()
+        if row:
+            self.run_worker(self.run_host_call(source, "approve", row, done="Approved."))
+
+    def action_deny(self):
+        source, row = self._row_and_source()
+        if row:
+            self.run_worker(self.run_host_call(source, "deny", row, done="Denied."))
+
+    def action_rename(self):
+        source, row = self._row_and_source()
+        if row:
+            self.push_screen(Ask("Name this session", "a name you will recognise tomorrow",
+                                 getattr(row, "label", "") or "", "Empty clears the name."),
+                             lambda name: self.run_worker(self.run_host_call(
+                                 source, "label", row, name.strip(), done="Named."))
+                             if name is not None else None)
+
+    def action_mute(self):
+        source, row = self._row_and_source()
+        if row:
+            on = not getattr(row, "muted", False)
+            self.run_worker(self.run_host_call(source, "mute", row, on,
+                                               done="Muted: hidden from Now." if on else "Unmuted."))
+
+    def action_mute_project(self):
+        source, row = self._row_and_source()
+        if row:
+            path = getattr(row, "repo", "") or row.cwd
+            self.run_worker(self.run_host_call(source, "mute_project", path, True,
+                                               done=f"Muted {Path(path).name} on {source.name}."))
 
     # ----- search and filters ----------------------------------------------------
 
@@ -1172,38 +1512,35 @@ class FourtopApp(App[tuple | None]):
         self.render_list()
 
     def action_new(self):
-        source = self.current_source()
         if self.manager.demo:
             self.set_status("DEMO is read-only. No agent will be started.")
             return
-        row = self.current()
-        cwd = row.cwd if row and source is self.current_source() else os.getcwd()
-        if not source.manager.remote and not (row and Path(cwd).is_dir()):
-            cwd = os.getcwd()
-        self.push_screen(NewAgent(cwd, where=source.name),
-                         lambda values: self._new_result(source, values))
+        preferred = self.sources.index(self.current_source())
+        self.push_screen(Dispatch(self, self.sources, preferred), self._dispatched)
 
-    def _new_result(self, source, values):
+    def _dispatched(self, values):
         if values:
-            self.run_worker(self._start(source, values))
+            self.run_worker(self._start(*values))
 
-    async def _start(self, source, values):
-        agent, cwd = values
+    async def _start(self, index, agent, cwd, prompt):
+        """Start a task on a machine, kept there, and show it beside the list."""
+        source = self.sources[index]
         manager = source.manager
         try:
             if manager.remote:
-                argv = manager.remote_argv(["new", agent, "--cwd", cwd, "--yes"]
+                argv = manager.remote_argv(["new", agent, "--cwd", cwd, "--prompt", prompt, "--yes"]
                                            + (["--resident"] if manager.keeps_agents else []))
                 directory, env = str(Path.home()), {}
             else:
-                plan = await asyncio.to_thread(manager.new, agent, cwd)
+                dispatch = getattr(manager, "dispatch", None)
+                plan = await asyncio.to_thread(dispatch, agent, cwd, prompt) if dispatch else \
+                    await asyncio.to_thread(manager.new, agent, cwd, (prompt,))
                 argv, directory, env = list(plan.argv), plan.cwd, plan.environment
         except (FourtopError, OSError, ValueError) as exc:
-            self.push_screen(NewAgent(cwd, clean_text(str(exc)), values, source.name),
-                             lambda again: self._new_result(source, again))
+            self.set_status(f"Could not start on {source.name}: {clean_text(str(exc))}")
             return
         tag = f"{source.name}:new-{int(time.time())}"
-        await self._launch(tag, argv, directory, env, f"new {agent}", remote=manager.remote)
+        await self._launch(tag, argv, directory, env, f"{agent}: {prompt[:20]}", remote=manager.remote)
 
     def _hand_over(self, action, message: str, remote: bool = False):
         self.set_status(message)
@@ -1236,12 +1573,17 @@ class FourtopApp(App[tuple | None]):
     def action_help(self):
         # Short lines: the list is often 40-60 columns wide beside an agent.
         lines = [
+            "Now: needs you · done · working · stopped",
+            "g        Now / every machine",
+            "",
             "↑ ↓      select        Enter   open",
-            "Space    preview       i       details",
-            "/        search        Ctrl-F  full content",
-            "p        one project   f       fold machine",
-            "[ ]      page          a       subagents",
-            "n        new agent     r       refresh",
+            "v        peek + reply  c       reply",
+            "y  d     approve/deny  n       new task",
+            "R        rename        x  X    mute / project",
+            "Space    messages      i       details",
+            "/        search all    Ctrl-F  full content",
+            "p        one project   A       scripted+sub",
+            "[ ]  f   page / fold   r       refresh",
             "Esc      clear filters",
             "",
         ]

@@ -62,7 +62,8 @@ def row_for(record: HistoryRecord, host: str = "local") -> Session:
                    None, record, bool(getattr(record, "subagent", False)),
                    str(getattr(record, "activity", "") or ""),
                    str(getattr(record, "last_request", "") or ""),
-                   str(getattr(record, "branch", "") or ""))
+                   str(getattr(record, "branch", "") or ""),
+                   scripted=bool(getattr(record, "scripted", False)))
 
 
 def slice_rows(rows: list[Session], query: str = "", agent=None, project=None) -> list[Session]:

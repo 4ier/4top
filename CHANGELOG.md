@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Now.** The panel opens on one list across every machine, most urgent first:
+  needs you, done, working, stopped, then the rest of the week. "Your turn" is now
+  "done": on a day of real sessions none of the turns it named asked the person
+  anything. Muted, scripted and subagent sessions stay out; `/` searches everything;
+  `g` returns to one section per machine.
+- **Act from the list.** `v` shows a running agent's screen with a reply line, `c`
+  replies, `y`/`d` approve or deny, `R` names a session, `x`/`X` mute it or its project,
+  and `n` starts a task (machine, recent project, agent, prompt) kept on its host.
+  These use the host's 4top; an older host says it cannot yet.
+- Rows show the repository (worktrees of one repo are one project), what the working
+  tree changed, and the machine in Now.
+
 ## 4top 0.2.0a8 — 2026-09-30
 
 - A remote session whose ssh was killed (by Android, by Termux) says "Disconnected"
