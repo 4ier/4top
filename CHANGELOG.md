@@ -14,6 +14,16 @@
   These use the host's 4top; an older host says it cannot yet.
 - Rows show the repository (worktrees of one repo are one project), what the working
   tree changed, and the machine in Now.
+- **Notifications on your phone, opt-in, without a daemon.** `4top notify --install`
+  wires this host's Claude Code (`Notification`, `Stop`, `StopFailure` hooks), Codex
+  (its `notify` program; one it already had keeps running) and Pi (an extension) to
+  `4top notify --from-hook`, which posts to an ntfy topic: `host · project`, needs
+  you (permission / question) at high priority, done, or error, with the agent's last
+  words and your latest request. A random topic on ntfy.sh is made and recorded as
+  `[notify] url` unless you give one. The hook returns at once and sends from a
+  detached process with a five-second limit; repeats per session are dropped;
+  scripted and subagent sessions stay quiet. Files are backed up before the first
+  change and `--uninstall` removes exactly what was added. `--test` sends a test.
 
 ## 4top 0.2.0a8 — 2026-09-30
 

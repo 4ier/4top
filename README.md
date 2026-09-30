@@ -191,6 +191,49 @@ ssh session, as before. Sessions of this machine still open in the panel's own
 layout, but one already kept here (opened from another device) is attached rather
 than started a second time.
 
+## Notifications on your phone
+
+Opt-in, per host, and without a daemon: the agents already call out when they need
+you or finish, and `4top notify --install` points those calls at 4top, which sends
+one message to an [ntfy](https://ntfy.sh) topic your phone subscribes to.
+
+```sh
+4top notify --install     # wire this host's agents; prints the topic to subscribe to
+4top notify --test        # one test message
+4top notify --uninstall   # remove exactly what --install added
+```
+
+Without a configured topic, `--install` makes a random one on the public ntfy.sh and
+records it as `[notify] url` in this host's configuration; `--url` names your own
+(a self-hosted server, or the same topic on every host). In the ntfy Android app, tap
+**+** and subscribe to the topic it prints. Run it on each host: every host's hooks
+send from that host.
+
+A message is titled `host · project` and says the state, as the panel names it,
+with what the agent said and your latest request:
+
+- **Needs you (permission / question)**, high priority: Claude Code asked to run a
+  tool or asked you something (its `Notification` hook); a Pi extension prompt.
+- **Done**: the turn ended (Claude Code `Stop`, Codex `notify`, Pi `agent_settled`).
+  Codex tells a notify program only about finished turns, so Codex is never "needs you".
+- **Error**: the turn failed (Claude Code `StopFailure`, a Pi error).
+
+What is wired: hooks in Claude Code's `settings.json`, Codex's top-level `notify`
+program in `config.toml` (a notify program Codex already had keeps running: 4top
+calls it first), and an extension file in Pi's `extensions/`. Each file is copied to
+`*.4top-backup` before the first change; entries 4top did not write are never touched.
+A hook returns at once and sends from a detached process with a five-second limit,
+so an unreachable server never holds up or fails the agent. Repeats are dropped: the
+same message about a session within ten minutes, or any within twenty seconds unless
+it newly needs you. Sessions started by a script (`claude -p`, `codex exec`) or by
+another agent are not reported, as far as the host's session-ls can tell them apart.
+
+On a public server the topic is the only secret: anyone who knows it can read the
+messages (host and project names, the request and the agent's last words) and send to
+it. Tapping a notification opens ntfy, not Termux: ntfy opens links, and Termux
+registers no link that would open it (only a broadcast to an automation app such as
+Tasker could).
+
 ## Command line
 
 ```sh
@@ -205,6 +248,7 @@ than started a second time.
 4top resume h_<key> --yes                 # restore this process as the agent
 4top attach h_<key>                       # the agent in this host's own tmux; started if needed
 4top new codex --resident                 # a new agent kept there too
+4top notify --install                     # push notifications through ntfy (above)
 4top doctor --json
 ```
 
@@ -247,6 +291,10 @@ preview_max_lines = 200
 
 [agents.claude]
 # args = ["--dangerously-skip-permissions"]
+
+[notify]                               # written by `4top notify --install`
+# url = "https://ntfy.sh/4top-<random>"  # the topic is the secret
+# events = ["needs-you", "done", "error"]
 ```
 
 `args` are added to every start and resume of that agent, for example a permission
@@ -259,7 +307,8 @@ Agent store roots respect `CODEX_HOME`, `CLAUDE_CONFIG_DIR`, and
 launch profile must agree. Local state is private: `$XDG_STATE_HOME/4top` holds a
 local identity and your last selection, and `$XDG_CACHE_HOME/4top` holds
 rebuildable metadata. No environment values, prompt text, or transcripts are
-retained. Network access is the ssh you configured, plus the daily update check.
+retained. Network access is the ssh you configured, plus the daily update check,
+plus, once you install notifications, one POST to your ntfy topic per message.
 
 [Privacy](docs/privacy.md) · [Troubleshooting](docs/troubleshooting.md) · [Design](docs/design.md)
 
