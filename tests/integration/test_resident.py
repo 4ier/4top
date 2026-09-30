@@ -109,7 +109,7 @@ def test_tmux_is_found_where_package_managers_put_it(lab, monkeypatch, tmp_path)
     (place / "tmux").write_text("#!/bin/sh\n")
     (place / "tmux").chmod(0o755)
     monkeypatch.setattr(workspace, "TMUX_PLACES", (str(place),))
-    assert workspace.tmux_binary({"PATH": "/usr/bin:/bin"}) == str(place / "tmux")
+    assert workspace.tmux_binary({"PATH": str(tmp_path / "empty")}) == str(place / "tmux")
 
 
 def test_without_tmux_attach_is_a_plain_resume(lab, monkeypatch):
