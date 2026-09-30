@@ -101,7 +101,20 @@ def test_a_new_resident_agent_is_found_by_its_session_key(host):
     assert len(running(lab.env)) == 2
 
 
-def test_without_tmux_attach_is_a_plain_resume(lab):
+def test_tmux_is_found_where_package_managers_put_it(lab, monkeypatch, tmp_path):
+    # ssh runs a command with the login's minimal PATH; Homebrew's tmux is not on it.
+    from fourtop import workspace
+    place = tmp_path / "brew"
+    place.mkdir()
+    (place / "tmux").write_text("#!/bin/sh\n")
+    (place / "tmux").chmod(0o755)
+    monkeypatch.setattr(workspace, "TMUX_PLACES", (str(place),))
+    assert workspace.tmux_binary({"PATH": "/usr/bin:/bin"}) == str(place / "tmux")
+
+
+def test_without_tmux_attach_is_a_plain_resume(lab, monkeypatch):
+    from fourtop import workspace
+    monkeypatch.setattr(workspace, "TMUX_PLACES", ())
     subprocess.run(lab.manager.new("pi", str(lab.path)).argv, cwd=str(lab.path), env=lab.env,
                    stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
     (key,) = [record.key for record in lab.manager.history(force=True).records]

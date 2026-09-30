@@ -389,7 +389,11 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                           + (["--", *extra] if extra else []))
                 return _exec(manager.remote_argv(remote))
             plan = manager.new(args.agent, args.cwd, extra, args.prompt)
-            return _hand_over(manager, manager.keep(plan) if args.resident else plan)
+            kept = manager.keep(plan) if args.resident else plan
+            if args.resident and kept is plan:
+                print("4top: no tmux on this host, so this agent runs in this connection "
+                      "and ends with it", file=sys.stderr)
+            return _hand_over(manager, kept)
         if command == "cloud":
             return _cloud(manager.config, args)
         if command == "resume":
