@@ -23,7 +23,8 @@
   `[notify] url` unless you give one. The hook returns at once and sends from a
   detached process with a five-second limit; repeats per session are dropped;
   scripted and subagent sessions stay quiet. Files are backed up before the first
-  change and `--uninstall` removes exactly what was added. `--test` sends a test.
+  change and `--uninstall` removes exactly what was added. `--test` sends a test;
+  `--agent NAME` limits install or uninstall to some agents.
 
 ## 4top 0.2.0a8 — 2026-09-30
 

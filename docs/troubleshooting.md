@@ -26,6 +26,7 @@ directory is a hard error; 4top will not reset identity behind your back.
 | Too many notifications | Repeats are dropped per session (the same message for ten minutes, anything within twenty seconds unless it newly needs you). Keep only some states with `[notify] events = ["needs-you"]`, or remove everything with `4top notify --uninstall`. |
 | Codex never says "needs you" | Codex tells a `notify` program only about finished turns. Approvals would need Codex hooks, which Codex asks you to review and trust first; 4top does not install them. |
 | Want the agent files as they were | `4top notify --uninstall` removes only 4top's entries and restores Codex's previous `notify`. The first change also left a copy next to each file: `settings.json.4top-backup`, `config.toml.4top-backup`. |
+| `Unknown configuration section: notify` | A 4top older than the one that ran `notify --install` is reading that configuration (a downgrade, or a second install on the machine). Update it, or remove the `[notify]` section. |
 | Remote host unreachable | `4top --host NAME doctor` shows the ssh exit and stderr. A missing key fails fast because `BatchMode` is always on. |
 | Remote `4top` not found | Non-login ssh shells may not have it on `PATH`; set `command` to an absolute path in `[hosts.NAME]`. |
 | Row schema mismatch | Update both machines to the same 4top version. Mismatched rows are refused, never partially parsed. |
