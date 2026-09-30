@@ -193,7 +193,9 @@ def adopt(env: dict[str, str], rows, names: set[str]) -> dict[str, str]:
 # type into it through tmux instead. They act only on a session that tmux says runs
 # here now, and never start anything.
 
-SEPARATOR = "\x1e4top:"  # between screens in one batched capture; never on a screen
+# Between screens in one batched capture. Printable on purpose: without a UTF-8
+# locale tmux escapes control characters in what display-message prints.
+SEPARATOR = "@@4top-screen@@ "
 
 
 def find(env: dict[str, str], query: str) -> str:
@@ -233,11 +235,14 @@ def screens(env: dict[str, str], names) -> dict[str, str]:
     result = _tmux(tmux, env, *args)
     if result is None:
         return {}
-    found = {}
-    for chunk in result.stdout.split(SEPARATOR)[1:]:
-        name, _, screen = chunk.partition("\n")
-        found[name] = screen
-    return found
+    found: dict[str, list[str]] = {}
+    current = None
+    for line in result.stdout.splitlines():
+        if line.startswith(SEPARATOR) and line[len(SEPARATOR):] in names:
+            current = found.setdefault(line[len(SEPARATOR):], [])
+        elif current is not None:
+            current.append(line)
+    return {name: "\n".join(lines) for name, lines in found.items()}
 
 
 def paste(env: dict[str, str], name: str, text: str, enter: bool = True) -> bool:
