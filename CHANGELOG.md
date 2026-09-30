@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `v` on a session with no agent running shows its latest messages instead of only
+  saying there is no agent.
+- Down or Up in the search box goes into the results, like Enter.
 - An agent started with a task has a row at once, before it writes a transcript.
   Claude writes none while it waits at its folder-trust dialog, which is exactly
   when it needs the person; its row now shows "needs you", opens, and `y` answers it.

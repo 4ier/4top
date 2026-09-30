@@ -431,7 +431,12 @@ class Peek(ModalScreen[None]):
         try:
             text = await asyncio.to_thread(self.app_.host_call, self.source, "peek", self.row)
         except (FourtopError, OSError, ValueError) as exc:
-            text = str(exc)
+            # No agent runs for it now: its latest messages still say what happened.
+            try:
+                _, body, _ = await asyncio.to_thread(self.source.manager.preview_tail, self.row, None)
+                text = f"({clean_text(str(exc))}; its latest messages:)\n\n{body}"
+            except (FourtopError, OSError, ValueError):
+                text = str(exc)
         self.query_one("#peek-body", Static).update(plain(text, multiline=True))
         self.call_after_refresh(self.query_one("#preview-scroll", VerticalScroll).scroll_end,
                                 animate=False)
@@ -774,6 +779,10 @@ class FourtopApp(App[tuple | None]):
 
     def on_key(self, event) -> None:
         self._last_input = time.monotonic()
+        if event.key in ("down", "up") and self.focused is self.query_one("#query", Input):
+            # From the search box the arrows go into the results, as Enter does.
+            event.stop()
+            self.search_submitted()
 
     def on_click(self, event) -> None:
         self._last_input = time.monotonic()

@@ -817,3 +817,32 @@ async def test_a_task_can_start_in_the_cloud(monkeypatch):
         assert started == [cloud.Request("claude", "fix the flaky test", "octo/app")]
         assert [list(call[2]) for call in workspace.calls if call[0] == "open"] == [["ssh", "sandbox", "app"]]
         await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_peeking_a_session_with_no_agent_shows_its_latest_messages():
+    from fourtop.app import Peek
+
+    app = FourtopApp(LocalDemo())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        await pilot.press("v")
+        await pilot.pause(.5)
+        assert isinstance(app.screen, Peek)
+        body = str(app.screen.query_one("#peek-body", Static).render())
+        assert "its latest messages" in body, body
+        await pilot.press("escape", "q")
+
+
+@pytest.mark.asyncio
+async def test_down_from_the_search_box_goes_into_the_results():
+    app = FourtopApp(DemoManager())
+    async with app.run_test(size=(100, 30)) as pilot:
+        await pilot.pause(.2)
+        await pilot.press("slash")
+        app.query_one("#query", Input).value = "中文"
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.pause()
+        assert app.focused is app.query_one("#list", OptionList)
+        await pilot.press("q")
