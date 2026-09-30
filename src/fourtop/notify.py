@@ -251,7 +251,7 @@ def deliver(config: Config, agent: str, payload: dict, manager=None, opener=urll
         if record is not None and (getattr(record, "subagent", False)
                                    or getattr(record, "scripted", False)):
             return False  # started by an agent or a script: nobody is waiting on it
-        message = compose(event, record)
+        message = compose(event, record, config.notify_name or None)
         digest = hashlib.sha256(message["message"].encode()).hexdigest()[:16]
         with manager.store.lock("notify", timeout=2):
             if not due(Path(config.state_dir) / "notify.json", message["key"], event.state,
@@ -639,7 +639,7 @@ def test(config: Config, opener=urllib.request.urlopen) -> str:
     if not config.notify_url:
         raise FourtopError("No [notify] url configured; run `4top notify --install` first", 3)
     try:
-        publish(config.notify_url, f"{host_name()} · 4top",
+        publish(config.notify_url, f"{config.notify_name or host_name()} · 4top",
                 "Test: notifications from this host reach this device.", 3,
                 ["white_check_mark"], opener=opener)
     except (OSError, ValueError) as exc:

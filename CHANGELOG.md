@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- `n` offers "cloud (E2B)" as a machine when `[cloud]` is configured: a repository
+  (earlier tasks' first) and a prompt start a cloud task and open its agent.
+- `[notify] name` names the machine in notification titles (default: its host name).
 - **Now.** The panel opens on one list across every machine, most urgent first:
   needs you, done, working, stopped, then the rest of the week. "Your turn" is now
   "done": on a day of real sessions none of the turns it named asked the person
