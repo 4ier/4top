@@ -52,6 +52,20 @@
   section the panel lists live tasks as sources of their own, and each one's
   `Snapshot.cloud` carries its state, cost so far and lifetime left.
   Verified against real sandboxes, as described in docs/e2b-design.md.
+- **The host side of it.** `list --json` rows carry `attention` (a kept agent's screen
+  shows a permission prompt or a question, matched against screens captured from
+  Claude Code and Codex; Pi asks nothing), `label` and `muted` (kept on the host in
+  `marks.json`), `repo` (read from `.git` on disk, without running git) and `changes`
+  (`git diff --shortstat HEAD` plus untracked files, for the last week's sessions,
+  cached per worktree). `list --json` on 2800 sessions costs about 5 ms more, 60 ms
+  when git is asked again.
+- The sync trailer carries `attention`, `labels` and `muted` like `resident`, so a
+  prompt appearing or a session being named costs a remote panel no full listing.
+- New commands: `peek`, `send`, `approve` and `deny` read and answer an agent kept on
+  its host without attaching (`approve`/`deny` press nothing, exit 4, when no
+  permission prompt is on screen); `label`, `mute` and `unmute` (a session, or
+  `--project DIR`); `projects` lists recent project directories; `new --prompt TEXT`
+  starts an agent with its first request.
 
 ## 4top 0.2.0a8 — 2026-09-30
 

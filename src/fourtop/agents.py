@@ -117,9 +117,16 @@ class Drivers:
             raise Missing(f"Directory does not exist or is not accessible: {path}")
         return str(path.resolve())
 
-    def plan_new(self, agent: str, cwd: str, extra: tuple[str, ...] = ()) -> LaunchPlan:
+    def plan_new(self, agent: str, cwd: str, extra: tuple[str, ...] = (),
+                 prompt: str | None = None) -> LaunchPlan:
+        """``prompt`` is the agent's first request. Claude Code, Codex and Pi each take
+        one as a positional argument (their --help: `claude [prompt]`, `codex [PROMPT]`,
+        `pi [messages...]`) and start interactively with it. It goes after `--`, so a
+        request that begins with a dash, or is a word like `review`, is still text."""
         executable = self.executable(agent)
         validate_extra(agent, extra)
+        if prompt is not None and (not prompt.strip() or "\x00" in prompt):
+            raise FourtopError("An initial prompt must be nonempty text", 2)
         cwd = self.cwd(cwd)
         capability = self.probe(agent)
         native_id = str(uuid.uuid4()) if capability.allocate_id else None
@@ -130,6 +137,8 @@ class Drivers:
         if native_id:
             args.extend(["--session-id", native_id])
         args.extend(extra)
+        if prompt is not None:
+            args.extend(("--", prompt))
         env = dict(self.config.environment)
         key = history_key(self.host_id, agent, root, native_id) if native_id else None
         return LaunchPlan(agent, executable, tuple(args), cwd, env, root, native_id, key)

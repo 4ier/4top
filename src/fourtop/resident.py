@@ -16,11 +16,13 @@ from __future__ import annotations
 
 import re
 import subprocess
+import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
 
 from .config import Config
+from .errors import Conflict, Missing
 from .models import LaunchPlan
 from .workspace import MARKER, _has_terminfo, terminal, tmux_binary
 
@@ -129,3 +131,95 @@ def keep(config: Config, plan: LaunchPlan, name: str | None = None) -> LaunchPla
     argv = (*base, "new-session", "-A", "-s", name, "-c", plan.cwd, "--", *command)
     return replace(plan, executable=tmux, argv=argv, environment=env)
 
+
+
+# ----- reading and answering an agent without attaching to it ----------------------
+#
+# A phone mostly wants to know what an agent is doing and to say one sentence to it.
+# Attaching takes the whole terminal for that, so these read the agent's screen and
+# type into it through tmux instead. They act only on a session that tmux says runs
+# here now, and never start anything.
+
+SEPARATOR = "\x1e4top:"  # between screens in one batched capture; never on a screen
+
+
+def find(env: dict[str, str], query: str) -> str:
+    """The running session a key names: exact, or a unique prefix of four or more."""
+    names = running(env)
+    name = session_name(query)
+    if name in names:
+        return name
+    matches = [n for n in names if len(query) >= 4 and n.startswith(name)]
+    if len(matches) > 1:
+        raise Conflict("Identifier is ambiguous; use a complete key")
+    if not matches:
+        raise Missing("No agent for this session runs on this host now")
+    return matches[0]
+
+
+def capture(env: dict[str, str], name: str, history: int = 0) -> str | None:
+    """The session's screen as plain text (tmux strips colours unless asked), plus up
+    to ``history`` lines above it; None when the session is not there."""
+    tmux = tmux_binary(env)
+    args = ["capture-pane", "-p", "-t", f"={name}:"] + (["-S", f"-{history}"] if history else [])
+    result = _tmux(tmux, env, *args) if tmux else None
+    return result.stdout if result and result.returncode == 0 else None
+
+
+def screens(env: dict[str, str], names) -> dict[str, str]:
+    """The screens of several sessions in one tmux call. A session that exited in the
+    meantime ends the batch early; the ones before it are still returned."""
+    names = sorted(names)
+    tmux = tmux_binary(env)
+    if not names or tmux is None:
+        return {}
+    args: list[str] = []
+    for name in names:
+        args += [";"] if args else []
+        args += ["display-message", "-p", SEPARATOR + name, ";", "capture-pane", "-p", "-t", f"={name}:"]
+    result = _tmux(tmux, env, *args)
+    if result is None:
+        return {}
+    found = {}
+    for chunk in result.stdout.split(SEPARATOR)[1:]:
+        name, _, screen = chunk.partition("\n")
+        found[name] = screen
+    return found
+
+
+def paste(env: dict[str, str], name: str, text: str, enter: bool = True) -> bool:
+    """Type ``text`` into the session as one bracketed paste, then Enter.
+
+    A paste arrives as one piece, so a newline inside it does not submit half a
+    message and the agent sees pasted text rather than keystrokes. Claude Code reads
+    an Enter that arrives with the paste as part of it, hence the pause.
+    """
+    tmux = tmux_binary(env)
+    if tmux is None:
+        return False
+    buffer = f"4top-{uuid.uuid4().hex[:8]}"
+    try:
+        loaded = subprocess.run([tmux, "-L", socket(env), "load-buffer", "-b", buffer, "-"],
+                                input=text, capture_output=True, text=True, env=env, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    if loaded.returncode != 0:
+        return False
+    pasted = _tmux(tmux, env, "paste-buffer", "-p", "-d", "-b", buffer, "-t", f"={name}:")
+    if not pasted or pasted.returncode != 0:
+        _tmux(tmux, env, "delete-buffer", "-b", buffer)
+        return False
+    if enter:
+        time.sleep(PASTE_SETTLE)
+        return press(env, name, ("Enter",))
+    return True
+
+
+PASTE_SETTLE = 0.3
+
+
+def press(env: dict[str, str], name: str, keys) -> bool:
+    """Press tmux key names (``Enter``, ``Escape``, ``y``) in the session."""
+    tmux = tmux_binary(env)
+    result = _tmux(tmux, env, "send-keys", "-t", f"={name}:", *keys) if tmux else None
+    return bool(result and result.returncode == 0)

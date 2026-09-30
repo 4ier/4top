@@ -239,14 +239,31 @@ e2b = "SANDBOX_ID"
 4top attach h_<key>                       # 本机专用 tmux 里的 agent；没有就先启动
 4top new codex --resident                 # 新 agent 也常驻在那里
 4top notify --install                     # 通过 ntfy 推送通知（见上文）
+4top new claude --cwd ~/code/app --prompt 'fix the flaky test' --resident
+4top projects --json                      # 本机最近的项目目录，供选择
+4top peek h_<key>                         # 看常驻 agent 的屏幕，不必接管终端
+4top send h_<key> 'yes, and add a test'   # 输入一段话，然后回车
+4top approve h_<key>                      # 对它的权限提示回答"是"
+4top deny h_<key>                         # 或"否"
+4top label h_<key> 'nightly migration'    # 给会话起名；不给名字即清除
+4top mute --project ~/code/bots           # 让一个项目的会话不进"现在"
+4top unmute --project ~/code/bots         # 恢复
 4top doctor --json
 ```
+
+`peek`、`send`、`approve`、`deny` 作用于常驻在本机专用 tmux 里的 agent，加 `--host`
+则在那台主机上执行。`approve`/`deny` 按下屏幕上那个提示自己的键（Claude Code：`1` / Esc；
+Codex：`y` / Esc）；此刻屏幕上没有权限提示时什么都不按，以退出码 4 拒绝，所以过时的一次点击
+不会打进已经在干别的事的 agent。没有常驻 agent 的会话退出码为 3。
 
 `--config`、`--host`、`--no-color` 放在子命令前后均可。key 只有在前缀无歧义时
 （至少四个字符）才允许缩短；行号永远不是执行目标。`list --json` 每行包含
 `schema_version`、`key`、`agent`、`host`、`cwd`、`title`、`started`、`last`、
 `source`、`status`、`can_resume`、`resident`（此刻这个会话有 agent 在本机专用的 tmux
-里运行）。
+里运行），以及主机在转录之外给出的：`attention`（`permission` 或 `question`：常驻 agent
+的屏幕显示它在等你）、`label` 和 `muted`（你用 `label`、`mute` 设的）、`repo`（所属仓库，
+同一仓库的各个 worktree 相同）和 `changes`（git 给出的改动：`files`、`insertions`、
+`deletions`、`untracked`、`dirty`，只算最近一周的会话）。
 
 ## 配置与隐私
 
@@ -257,7 +274,7 @@ e2b = "SANDBOX_ID"
 `[agents.NAME] args` 会加到该 agent 的每次启动和恢复上（例如权限模式，4top 默认不加任何参数）；
 远程主机要在那台主机自己的配置里设置，因为命令是远端的 4top 生成的。
 
-本地状态保持私有：`$XDG_STATE_HOME/4top` 里只有本机身份和上次选中项，
+本地状态保持私有：`$XDG_STATE_HOME/4top` 里只有本机身份、上次选中项和你给会话起的名字与静音（`marks.json`），
 `$XDG_CACHE_HOME/4top` 是可重建的元数据缓存。不保留环境变量值、prompt 文本或转录内容。
 网络访问只有你配置的 ssh，以及每天一次的 PyPI 更新检查（`[ui] update_check = false` 可关闭）；
 开启通知后，每条通知再向你的 ntfy 主题发一次 POST（`[notify] events` 可只选部分状态）。标题和路径本身可能敏感，录屏前仍需检查。

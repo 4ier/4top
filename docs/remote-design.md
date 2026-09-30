@@ -143,6 +143,17 @@ ssh session at all.
   "Disconnected": the agent is still there, and Enter attaches again. `Q` closes
   what this panel has open; a kept agent only loses the view.
 
+- **Reading and answering a kept agent.** `peek`, `send`, `approve` and `deny` run
+  on the host like any other command, through `run_remote`: the panel never types
+  into another machine's tmux itself. `approve`/`deny` read the screen again on the
+  host and press nothing (exit 4) unless a permission prompt is there now. A prompt
+  appearing, a name or a mute writes no transcript, so the sync trailer carries
+  `attention`, `labels` and `muted` for every row, applied like `resident`. An older
+  host sends none of them and its rows are left as sent.
+- **Starting a task.** `new AGENT --cwd DIR --prompt TEXT --resident --yes` goes
+  through `ssh -t` like `attach`; the prompt is the CLI's own positional argument
+  (after `--`), so the agent starts on it in the host's tmux.
+
 What this is not: no supervisor and no restart. An agent that exits or crashes is
 gone, as before, and its transcript is where it can be resumed from.
 

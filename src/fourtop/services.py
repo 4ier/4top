@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 import os
 import subprocess
 import threading
 import time
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from session_ls import _injected
@@ -27,19 +29,23 @@ from session_ls.api import (
     utc_now,
 )
 
-from . import e2b, resident
+from . import e2b, gitinfo, prompts, resident
 from .agents import Drivers
 from .config import Config, Host
-from .errors import Conflict, FourtopError, Missing
+from .errors import Conflict, FourtopError, Missing, Unavailable
 from .hosts import (
+    DIAGNOSTIC_PREFIX,
     remote_check,
     remote_preview,
     remote_preview_tail,
     remote_search,
     remote_snapshot,
     rows_of,
+    run_remote,
     ssh_argv,
+    ssh_failure,
 )
+from .marks import Marks, muted
 from .models import LaunchPlan, Session, Snapshot
 from .state import StateStore
 from .sync import SyncState
@@ -57,14 +63,30 @@ def unique(items, query: str, keys):
     return matches[0]
 
 
-def row_for(record: HistoryRecord, host: str = "local") -> Session:
+def row_for(record: HistoryRecord, host: str = "local", repo: str = "") -> Session:
     return Session(record.key, record.agent, record.cwd, record.title, record.started, record.last,
                    host, record.file, record.status, tuple(record.problems), record.can_resume,
                    None, record, bool(getattr(record, "subagent", False)),
                    str(getattr(record, "activity", "") or ""),
                    str(getattr(record, "last_request", "") or ""),
                    str(getattr(record, "branch", "") or ""),
-                   scripted=bool(getattr(record, "scripted", False)))
+                   repo=repo, scripted=bool(getattr(record, "scripted", False)))
+
+
+# Working-tree changes are asked of git only for sessions this recent, and a project
+# picker offers the directories of this last month.
+CHANGES_WINDOW = timedelta(days=7)
+PROJECTS_WINDOW = timedelta(days=30)
+PEEK_LINES = 40
+
+
+def _since(window: timedelta) -> str:
+    # `last` is an ISO timestamp in one fixed format, so text order is time order.
+    return (datetime.now(timezone.utc) - window).isoformat()
+
+
+def _key(row) -> str:
+    return row if isinstance(row, str) else row.key
 
 
 def slice_rows(rows: list[Session], query: str = "", agent=None, project=None) -> list[Session]:
@@ -92,7 +114,10 @@ class Manager:
         self._history_lock = threading.Lock()
         self.stop_event = threading.Event()
         self._running, self._running_at = set(), float("-inf")
+        self._signals: dict[str, dict] = {}
+        self.marks = Marks(self.store)
         if host is None:
+            self.changes = gitinfo.Changes(config.cache_dir / "git.json", config.environment)
             self.index = HistoryIndex(config.roots, config.cache_dir / "history.json",
                                       self.store.host_id, config.metadata_max_bytes,
                                       config.metadata_max_lines)
@@ -165,13 +190,55 @@ class Manager:
         # The panel asks every second; rows are rebuilt only when the scan changed, and
         # tmux is asked which agents run here as often as history is scanned.
         if getattr(self, "_rows_of", None) is not history:
-            self._rows_of, self._rows = history, [row_for(record) for record in history.records]
+            self._rows_of, self._rows = history, [row_for(record, repo=gitinfo.repo_of(record.cwd))
+                                                  for record in history.records]
+            self._running_at = float("-inf")  # new rows: ask for their signals now
         now = time.monotonic()
         if load_history or now - self._running_at >= self.config.history_refresh_seconds:
-            self._running, self._running_at = resident.running(self.config.environment), now
-        rows = [replace(row, resident=True) if resident.session_name(row.key) in self._running
-                else row for row in self._rows] if self._running else list(self._rows)
+            self._signals, self._running_at = self._read_signals(self._rows), now
+        signals = self._signals
+        rows = [replace(row, **signals[row.key]) if row.key in signals else row
+                for row in self._rows] if signals else list(self._rows)
         return Snapshot(rows, list(dict.fromkeys(history.issues)), history.observed_at, "local")
+
+    def _read_signals(self, rows: list[Session]) -> dict[str, dict]:
+        """What this host says about its rows beyond their transcripts, by key: an agent
+        running here and whether it waits on the person (tmux), the person's names and
+        mutes (marks.json), and what the working tree changed (git, recent rows only).
+        Only rows that differ from the defaults are listed."""
+        env = self.config.environment
+        self._running = resident.running(env)
+        by_name = {resident.session_name(row.key): row.key for row in rows} if self._running else {}
+        waiting = {by_name[name]: prompts.attention(screen)
+                   for name, screen in resident.screens(env, set(by_name) & self._running).items()}
+        marks = self.marks.load()
+        recent, since = {}, _since(CHANGES_WINDOW)
+        for row in rows:
+            if row.last >= since and row.cwd:
+                recent[row.cwd] = max(recent.get(row.cwd, ""), row.last)
+        changes = self.changes.of(recent)
+        signals: dict[str, dict] = {}
+        for row in rows:
+            found = {}
+            if by_name and resident.session_name(row.key) in self._running:
+                found["resident"] = True
+                if waiting.get(row.key):
+                    found["attention"] = waiting[row.key]
+            if row.key in marks["labels"]:
+                found["label"] = marks["labels"][row.key]
+            if muted(marks, row.key, row.cwd, row.repo):
+                found["muted"] = True
+            if row.last >= since and row.cwd in changes:
+                found["changes"] = changes[row.cwd]
+            if found:
+                signals[row.key] = found
+        return signals
+
+    def _changed(self) -> None:
+        """Something this process did changed a signal: read them again next time."""
+        self._running_at = float("-inf")
+        if self.host is not None:
+            self._remote_at = 0.0
 
     def search(self, query: str, full=False, cancel=None) -> Snapshot:
         if self.host is not None:
@@ -291,10 +358,10 @@ class Manager:
                 "cwd_missing": cwd_missing, "resumable": reason is None, "reason": reason,
                 "status": record.status, "problems": list(record.problems)}
 
-    def new(self, agent: str, cwd: str, extra: tuple[str, ...] = ()) -> LaunchPlan:
+    def new(self, agent: str, cwd: str, extra: tuple[str, ...] = (), prompt: str | None = None) -> LaunchPlan:
         if self.host is not None:
             raise Missing("Starting an agent on another host runs there; see remote_argv")
-        return self.drivers.plan_new(agent, cwd, extra)
+        return self.drivers.plan_new(agent, cwd, extra, prompt)
 
     def resume(self, query: str, cwd: str | None = None) -> LaunchPlan:
         if self.host is not None:
@@ -323,6 +390,153 @@ class Manager:
             raise Missing("This is the local view; no remote command applies")
         self.wake()
         return ssh_argv(self.config, self.host, args, tty=True)
+
+    # ----- an agent kept on this host: read it, answer it, start one with a task ------
+    #
+    # Each takes a row (or its key). On a remote host the host's own CLI does the work
+    # through `run_remote`, so the panel never types into a machine's tmux from afar.
+
+    def _call(self, args: list[str], what: str) -> str:
+        """The host's own CLI, over ssh; its refusal is raised with its own words."""
+        code, out, err = run_remote(self.config, self.host, args)
+        if code == 0:
+            return out
+        said = [line[len(DIAGNOSTIC_PREFIX):] for line in clean_text(err, multiline=True).splitlines()
+                if line.startswith(DIAGNOSTIC_PREFIX)]
+        if code == 2 and ("invalid choice" in err or "unrecognized arguments" in err):
+            raise FourtopError(f"{self.host.name}: its 4top cannot {what} yet; update it", 2)
+        if code in (1, 2, 3, 4, 5, 6) and said:
+            raise FourtopError(f"{self.host.name}: {said[-1]}", code)
+        raise ssh_failure(self.host, code, err)
+
+    def screen(self, row, lines: int = PEEK_LINES) -> dict:
+        """The agent's screen now, its last ``lines`` lines (scrollback included), and
+        the prompt on it if any: {key, session, attention, prompt, lines}."""
+        key, lines = _key(row), max(1, int(lines))
+        if self.host is not None:
+            try:
+                value = json.loads(self._call(["peek", key, "--lines", str(lines), "--json"], "peek"))
+                return {**value, "lines": [clean_text(line) for line in value["lines"]]}
+            except (ValueError, KeyError, TypeError):
+                raise Unavailable(f"{self.host.name}: peek did not return JSON") from None
+        name = resident.find(self.config.environment, key)
+        text = resident.capture(self.config.environment, name, history=lines)
+        if text is None:
+            raise Missing("No agent for this session runs on this host now")
+        shown = [clean_text(line).rstrip() for line in text.splitlines()]
+        while shown and not shown[-1]:
+            shown.pop()
+        prompt = prompts.detect("\n".join(shown))
+        return {"key": key, "session": name, "attention": prompt.kind if prompt else "",
+                "prompt": prompt.name if prompt else "", "lines": shown[-lines:]}
+
+    def peek(self, row, lines: int = PEEK_LINES) -> str:
+        """The agent's screen as text, for reading without taking over a terminal."""
+        return "\n".join(self.screen(row, lines)["lines"])
+
+    def send(self, row, text: str, enter: bool = True) -> None:
+        """Paste ``text`` into the agent, then press Enter (unless ``enter`` is False)."""
+        key = _key(row)
+        if not text:
+            raise FourtopError("Nothing to send", 2)
+        if self.host is not None:
+            self._call(["send", key] + ([] if enter else ["--no-enter"]) + ["--", text], "send")
+        else:
+            name = resident.find(self.config.environment, key)
+            if not resident.paste(self.config.environment, name, text, enter):
+                raise Unavailable("tmux did not take the text; the agent may have just exited")
+        self._changed()
+
+    def _answer(self, row, approve: bool) -> str:
+        what = "approve" if approve else "deny"
+        key = _key(row)
+        if self.host is not None:
+            self._call([what, key], what)
+            self._changed()
+            return what
+        env = self.config.environment
+        name = resident.find(env, key)
+        prompt = prompts.detect(resident.capture(env, name) or "")
+        # Checked on the screen as it is now, not as the list last showed it: a stale
+        # tap must never type into an agent that has moved on.
+        if prompt is None or prompt.kind != "permission":
+            raise Conflict("No permission prompt on this agent's screen now; nothing was pressed")
+        if not resident.press(env, name, prompt.approve if approve else prompt.deny):
+            raise Unavailable("tmux did not take the keys; the agent may have just exited")
+        self._changed()
+        return prompt.name
+
+    def approve(self, row) -> str:
+        """Answer yes to the permission prompt on the agent's screen; Conflict if none."""
+        return self._answer(row, True)
+
+    def deny(self, row) -> str:
+        """Answer no to the permission prompt on the agent's screen; Conflict if none."""
+        return self._answer(row, False)
+
+    def label(self, row, name: str) -> None:
+        """Name a session; an empty name clears it."""
+        key = _key(row)
+        if self.host is not None:
+            self._call(["label", key] + (["--", name] if name else []), "label")
+        else:
+            if isinstance(row, str):
+                key = self.resolve_row(key).key
+            self.marks.label(key, name)
+        self._changed()
+
+    def mute(self, row, on: bool = True) -> None:
+        """Hide a session from Now (or show it again)."""
+        key = _key(row)
+        if self.host is not None:
+            self._call(["mute" if on else "unmute", key], "mute")
+        else:
+            if isinstance(row, str):
+                key = self.resolve_row(key).key
+            self.marks.mute(key, on)
+        self._changed()
+
+    def mute_project(self, path: str, on: bool = True) -> None:
+        """Hide every session of a project (a repository or a directory) from Now."""
+        if self.host is not None:
+            self._call(["mute" if on else "unmute", "--project", path], "mute")
+        else:
+            self.marks.mute_project(path, on)
+        self._changed()
+
+    def projects(self) -> list[dict]:
+        """Directories sessions ran in this last month, most recent first, for a picker:
+        [{path, sessions, last, agents}]. A directory in a repository is listed as the
+        repository; directories that are gone are left out."""
+        if self.host is not None:
+            out = self._call(["projects", "--json"], "list projects")
+            try:
+                found = [json.loads(line) for line in out.splitlines() if line.strip()]
+                return [item for item in found if isinstance(item, dict) and isinstance(item.get("path"), str)]
+            except ValueError:
+                raise Unavailable(f"{self.host.name}: projects did not return JSON") from None
+        since, found = _since(PROJECTS_WINDOW), {}
+        for row in self.snapshot().rows:
+            if row.last < since or row.subagent or row.scripted or not row.cwd:
+                continue
+            path = row.repo or row.cwd
+            entry = found.setdefault(path, {"path": path, "sessions": 0, "last": "", "agents": set()})
+            entry["sessions"] += 1
+            entry["last"] = max(entry["last"], row.last)
+            entry["agents"].add(row.agent)
+        listed = [{**entry, "agents": sorted(entry["agents"])} for entry in found.values()
+                  if os.path.isdir(entry["path"])]
+        return sorted(listed, key=lambda entry: entry["last"], reverse=True)
+
+    def dispatch(self, agent: str, cwd: str, prompt: str) -> LaunchPlan:
+        """A new agent with its first request, kept in this host's agent server and
+        shown from there. A remote host is asked through ``remote_argv(["new", AGENT,
+        "--cwd", DIR, "--prompt", TEXT, "--yes", "--resident"])``, with a terminal."""
+        if self.host is not None:
+            raise Missing("Starting an agent on another host runs there; see remote_argv")
+        if not prompt or not prompt.strip():
+            raise FourtopError("Say what the agent should do", 2)
+        return resident.keep(self.config, self.drivers.plan_new(agent, cwd, (), prompt))
 
     def run(self, plan: LaunchPlan) -> int:
         """Run a native agent in the current terminal and return when it exits."""

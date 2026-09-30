@@ -1,0 +1,40 @@
+[Prompts]
+  /council, /draw-instruction, /element-format, /gather-context-and-clarify, /parallel-cleanup,
+/parallel-research, /parallel-review, /README, /review-instruction, /review-loop
+
+[Extensions]
+  @fyeeme/pi-session-name, @tifan/pi-recap:src, 4ier/pi-ntfy:src,
+kostyay/pi-k-excalidraw:pi-k-excalidraw, orca-agent-status.ts, orca-prefill.ts,
+orca-titlebar-spinner.ts, pi-goal:.pi/extensions/pi-goal, pi-subagents, pi-subs:src,
+pi-tool-display, pi-working-activity, pi-zentui:zentui
+
+[Themes]
+  catppuccin-mocha
+
+
+ Warning: tmux extended-keys is off. Modified Enter keys may not work. Add `set -g extended-keys
+ on` to ~/.tmux.conf and restart tmux.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Update Available
+ New version 0.99.1 is available. Run pi update
+ Changelog: https://pi.dev/changelog
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ Package Updates Available
+ Package updates are available. Run pi update --extensions
+ Packages:
+ - pi-powerline-footer
+ - pi-zentui
+ - pi-subagents
+ - github.com/4ier/pi-ntfy
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+|
+|
+|
+| deepseek-flash  Deepseek  high
+────────────────────────────────────────────────────────────────────────────────────────────────────
+ 4top-capture                                                     0.0%/1.0M (auto) | ↑0 ↓0 | $0.000

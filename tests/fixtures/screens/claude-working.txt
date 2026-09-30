@@ -1,0 +1,40 @@
+
+❯ Use the Bash tool to run exactly this command: touch /tmp/4top-capture/probe.txt  (then reply OK)
+
+  Ran 1 shell command
+  ⎿  Interrupted · What should Claude do instead?
+
+✻ Worked for 3s · done 8:06 AM
+
+❯ Now run that same touch command again with the Bash tool, then reply OK.
+
+  Ran 1 shell command
+
+⏺ OK. /tmp/4top-capture/probe.txt was created.
+
+✻ Cooked for 4s · done 8:06 AM
+
+❯ Use the Write tool to create /tmp/4top-capture/w.txt containing the word hi.
+
+⏺ Write(/tmp/4top-capture/w.txt)
+  ⎿  User rejected write to ../../../tmp/4top-capture/w.txt
+      1 hi
+
+✻ Crunched for 2s · done 8:07 AM
+
+❯ Use the AskUserQuestion tool to ask me one question: tea or coffee? Do nothing else.
+
+⏺ User declined to answer questions
+  ⎿  · Tea or coffee? (Tea / Coffee)
+
+✻ Crunched for 2s · done 8:07 AM
+
+❯ Count slowly from 1 to 30 in words, one per line.
+
+✻ Drizzling…
+                                                                                ◐ medium · /effort
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────
+
+  ⏸ manual mode on · ← 1 agent

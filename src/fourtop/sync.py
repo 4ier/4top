@@ -52,11 +52,41 @@ def trailer(payloads: list[dict[str, Any]]) -> dict[str, Any]:
     change; the client applies this list to every row before comparing digests,
     instead of fetching every row again. Its presence also says the host has
     ``attach``.
+
+    ``attention``, ``labels`` and ``muted`` are the same kind of change: an agent
+    reaching a permission prompt, or the person naming or muting a session, writes
+    no transcript either. They are carried and applied the same way.
     """
     return {"version": SYNC_VERSION, "count": len(payloads),
             "digest": digest({str(p["key"]): fingerprint(p) for p in payloads}),
             "cursor": max((str(p.get("last") or "") for p in payloads), default=""),
-            "resident": sorted(str(p["key"]) for p in payloads if p.get("resident"))}
+            "resident": sorted(str(p["key"]) for p in payloads if p.get("resident")),
+            "attention": {str(p["key"]): str(p["attention"]) for p in payloads if p.get("attention")},
+            "labels": {str(p["key"]): str(p["label"]) for p in payloads if p.get("label")},
+            "muted": sorted(str(p["key"]) for p in payloads if p.get("muted"))}
+
+
+# Row fields the trailer carries for every row, with the value a row has when the
+# trailer does not name it. A client applies them before comparing digests.
+CARRIED = (("resident", "resident", False), ("attention", "attention", ""),
+           ("labels", "label", ""), ("muted", "muted", False))
+
+
+def apply(merged: dict[str, dict[str, Any]], summary: dict[str, Any]) -> None:
+    """Set every row's carried fields from the trailer, in place. A field the host did
+    not send (an older host) is left as the rows have it."""
+    for name, field, default in CARRIED:
+        if name not in summary:
+            continue
+        value = summary[name]
+        if isinstance(value, list):
+            wanted = {str(key): True for key in value}
+        else:
+            wanted = {str(key): item for key, item in value.items()}
+        for key, payload in merged.items():
+            current = wanted.get(key, default)
+            if payload.get(field, default) != current:
+                merged[key] = {**payload, field: current}
 
 
 def changed_since(payloads: list[dict[str, Any]], since: str | None) -> list[dict[str, Any]]:

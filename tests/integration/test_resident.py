@@ -11,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import uuid
+from pathlib import Path
 
 import pytest
 from conftest import eventually
@@ -107,3 +108,58 @@ def test_without_tmux_attach_is_a_plain_resume(lab):
     lab.config.environment["PATH"] = str(lab.path / "bin")
     plan = lab.manager.attach(key)
     assert plan.argv[0].endswith("/pi") and "--session" in plan.argv
+
+
+SCREENS = Path(__file__).parents[1] / "fixtures" / "screens"
+
+
+def kept(lab, device, screen=None):
+    """A new resident pi, optionally drawing a captured prompt; its key and report."""
+    if screen:
+        lab.env["FAKE_SCREEN"] = str(SCREENS / screen)
+    device("new", "pi", "--cwd", str(lab.path), "--resident")
+    agent = eventually(lambda: reports(lab))[0]
+    (record,) = eventually(lambda: lab.manager.history(force=True).records)
+    eventually(lambda: running(lab.env) == {record.key})
+    return record.key, agent
+
+
+def test_a_prompt_on_a_kept_agents_screen_needs_the_person_and_is_answered_once(host):
+    lab, device = host
+    key, agent = kept(lab, device, "claude-bash-permission.txt")
+    row = eventually(lambda: [r for r in map(json.loads, lab.cli("list", "--json").stdout.splitlines())
+                              if r["attention"]])[0]
+    assert row["key"] == key and row["attention"] == "permission" and row["resident"]
+    summary = json.loads(lab.cli("list", "--json", "--sync").stdout.splitlines()[-1])["sync"]
+    assert summary["attention"] == {key: "permission"}, "carried by the sync trailer"
+
+    peek = lab.cli("peek", key, "--json")
+    assert peek.returncode == 0, peek.stderr
+    screen = json.loads(peek.stdout)
+    assert screen["prompt"] == "claude-permission" and "Do you want to proceed?" in "\n".join(screen["lines"])
+
+    assert lab.cli("approve", key).returncode == 0
+    eventually(lambda: [r for r in reports(lab) if r.get("typed") == "1"])
+    eventually(lambda: "ANSWERED" in lab.cli("peek", key).stdout)
+    again = lab.cli("approve", key)
+    assert again.returncode == 4 and "nothing was pressed" in again.stderr, \
+        "a stale tap never types into an agent that moved on"
+    assert [r["typed"] for r in reports(lab) if r["pid"] == agent["pid"]] == ["1"]
+
+
+def test_deny_presses_escape_and_send_pastes_then_enters(host):
+    lab, device = host
+    key, agent = kept(lab, device, "codex-exec-approval.txt")
+    assert lab.cli("deny", key[:10]).returncode == 0, "a unique prefix is enough"
+    eventually(lambda: [r for r in reports(lab) if r.get("typed") == "\x1b"])
+    result = lab.cli("send", key, "--", "-a line that starts with a dash")
+    assert result.returncode == 0, result.stderr
+    typed = eventually(lambda: [r["typed"] for r in reports(lab) if r.get("typed", "").endswith("\n")])[0]
+    assert typed == "\x1b-a line that starts with a dash\n"
+
+
+def test_talking_to_a_session_without_a_kept_agent_is_refused(host):
+    lab, _ = host
+    for command in (["peek", "h_0123456789"], ["send", "h_0123456789", "hi"], ["approve", "h_0123456789"]):
+        result = lab.cli(*command)
+        assert result.returncode == 3 and "runs on this host now" in result.stderr
