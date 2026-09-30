@@ -135,6 +135,7 @@ class Config:
     notify_url: str = ""  # "": no push notifications; see fourtop.notify
     notify_events: tuple[str, ...] = NOTIFY_EVENTS
     cloud: Cloud = field(default_factory=Cloud)
+    notify_name: str = ""  # what the phone calls this machine; "" is its host name
 
     def root(self, agent: str) -> Root:
         return next(root for root in self.roots if root.agent == agent)
@@ -182,7 +183,7 @@ class Config:
             ("ui", ui, {"refresh_seconds", "history_refresh_seconds", "color", "layout",
                         "rows_per_host", "update_check"}),
             ("history", history, {"metadata_max_bytes", "metadata_max_lines", "preview_max_lines"}),
-            ("notify", notify, {"url", "events"}),
+            ("notify", notify, {"url", "events", "name"}),
         ):
             if set(values) - permitted:
                 raise FourtopError(f"Unknown option in [{section}]: " + ", ".join(sorted(set(values) - permitted)), 2)
@@ -228,6 +229,9 @@ class Config:
         if (not isinstance(events, list) or not events
                 or not all(isinstance(event, str) and event in NOTIFY_EVENTS for event in events)):
             raise FourtopError("notify.events must list some of: " + ", ".join(NOTIFY_EVENTS), 2)
+        notify_name = notify.get("name", "")
+        if not isinstance(notify_name, str) or len(notify_name) > 40 or "\n" in notify_name:
+            raise FourtopError("notify.name must be a short name for this machine", 2)
         return cls(state, cache, roots, executables, env,
                    _number(ui, "refresh_seconds", 1.0, 0.1),
                    _number(ui, "history_refresh_seconds", 5.0, 0.1),
@@ -237,4 +241,4 @@ class Config:
                    {name: _host(name, options) for name, options in hosts.items()},
                    agent_args, layout, _number(ui, "rows_per_host", 0, 0, True), update_check,
                    notify_url, tuple(dict.fromkeys(events)),
-                   _cloud(data.get("cloud")))
+                   _cloud(data.get("cloud")), notify_name.strip())

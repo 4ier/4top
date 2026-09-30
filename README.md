@@ -92,7 +92,7 @@ the list returns when it exits.
 | `g` | Switch between Now (every machine, most urgent first) and one section per machine |
 | `v`, `c` | Peek at a running agent's screen and reply there; reply in one line |
 | `y`, `d` | Approve or deny the permission prompt an agent is waiting on |
-| `n` | New task: machine, recent project, agent, what to do; kept on its host |
+| `n` | New task: machine, recent project, agent, what to do; kept on its host (with `[cloud]`, also a sandbox) |
 | `R`, `x`, `X` | Name a session; mute it, or its whole project, from Now |
 | `→`, `Alt-←` / `Alt-→` | Move to the agent / between list and agent (tmux layout) |
 | `[` / `]`, `f` | Previous / next page and fold (per-machine view) |
@@ -359,6 +359,7 @@ preview_max_lines = 200
 [notify]                               # written by `4top notify --install`
 # url = "https://ntfy.sh/4top-<random>"  # the topic is the secret
 # events = ["needs-you", "done", "error"]
+# name = "mac"                         # the machine in each title; default its host name
 ```
 
 `args` are added to every start and resume of that agent, for example a permission

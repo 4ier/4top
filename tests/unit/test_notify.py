@@ -361,3 +361,9 @@ def test_test_message_reports_delivery_and_failure(lab, ntfy, capsys):
     assert main(["--config", str(lab.config_file), "notify", "--test"]) == 6
     lab.config_file.write_text("")
     assert main(["--config", str(lab.config_file), "notify", "--test"]) == 3
+
+
+
+def test_a_named_machine_is_named_in_the_title(lab, ntfy):
+    notify.test(configured(lab, ntfy.url, 'name = "mac"\n'))
+    assert ntfy.received[0]["json"]["title"] == "mac · 4top"

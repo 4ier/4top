@@ -468,12 +468,16 @@ class Dispatch(ModalScreen[tuple | None]):
         super().__init__()
         self.app_, self.sources, self.preferred = app_, sources, preferred
         self.projects: list[str] = []
+        # A task in a cloud sandbox: for when the machines at home are asleep or busy.
+        self.cloud = getattr(getattr(app_.manager.config, "cloud", None), "enabled", False)
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Static("New task", classes="dialog-title")
-            yield Select([(s.name, i) for i, s in enumerate(self.sources)],
-                         value=self.preferred, allow_blank=False, id="host")
+            machines = [(s.name, i) for i, s in enumerate(self.sources)]
+            if self.cloud:
+                machines.append(("cloud (E2B)", "cloud"))
+            yield Select(machines, value=self.preferred, allow_blank=False, id="host")
             yield OptionList(id="projects")
             yield Input(placeholder="or a directory on that machine", id="cwd")
             yield Select([(agent, agent) for agent in ("claude", "codex", "pi")],
@@ -492,23 +496,44 @@ class Dispatch(ModalScreen[tuple | None]):
         await self.load_projects()
 
     async def load_projects(self):
-        source = self.sources[self.query_one("#host", Select).value]
+        choice = self.query_one("#host", Select).value
         listing = self.query_one("#projects", OptionList)
         listing.clear_options()
-        try:
-            found = await asyncio.to_thread(self.app_.host_call, source, "projects")
-        except (FourtopError, OSError, ValueError, AttributeError):
-            # An older host: offer the directories its sessions ran in.
-            seen: dict[str, int] = {}
-            for row in source.snapshot.rows[:400]:
-                seen.setdefault(getattr(row, "repo", "") or row.cwd, 0)
-            found = [{"path": path} for path in seen if path]
-        self.projects = [str(item["path"] if isinstance(item, dict) else item) for item in found][:30]
+        where = self.query_one("#cwd", Input)
+        where.value = ""
+        if choice == "cloud":
+            # The sandbox clones what was pushed, so a task names a repository; the
+            # ones earlier tasks used come first.
+            where.placeholder = "GitHub owner/repo or a repository URL"
+            found = await self.cloud_repos()
+        else:
+            where.placeholder = "or a directory on that machine"
+            found = await self.host_projects(self.sources[choice])
+        self.projects = list(dict.fromkeys(
+            str(item["path"] if isinstance(item, dict) else item) for item in found))[:30]
         listing.add_options([Option(Text.assemble(Path(p).name, ("  " + p, "dim")), id=str(i))
                              for i, p in enumerate(self.projects)])
         if self.projects:
             listing.highlighted = 0
             self.query_one("#cwd", Input).value = self.projects[0]
+
+    async def host_projects(self, source) -> list:
+        try:
+            return await asyncio.to_thread(self.app_.host_call, source, "projects")
+        except (FourtopError, OSError, ValueError, AttributeError):
+            # An older host: offer the directories its sessions ran in.
+            seen: dict[str, int] = {}
+            for row in source.snapshot.rows[:400]:
+                seen.setdefault(getattr(row, "repo", "") or row.cwd, 0)
+            return [{"path": path} for path in seen if path]
+
+    async def cloud_repos(self) -> list:
+        from .cloud import tasks
+        try:
+            rows = (await asyncio.to_thread(tasks, self.app_.manager.config))[0]
+        except (FourtopError, OSError, ValueError):
+            return []
+        return [{"path": row["repo"]} for row in rows if row.get("repo")]
 
     @on(OptionList.OptionHighlighted, "#projects")
     def picked(self, event):
@@ -527,6 +552,9 @@ class Dispatch(ModalScreen[tuple | None]):
         prompt = self.query_one("#prompt", Input).value.strip()
         if not cwd or not prompt:
             self.query_one("#form-error", Static).update("A directory and a task are required.")
+            return
+        if self.query_one("#host", Select).value == "cloud" and self.query_one("#agent", Select).value == "pi":
+            self.query_one("#form-error", Static).update("Cloud tasks run claude or codex.")
             return
         self.dismiss((self.query_one("#host", Select).value, str(self.query_one("#agent", Select).value),
                       cwd, prompt))
@@ -1544,6 +1572,9 @@ class FourtopApp(App[tuple | None]):
 
     async def _start(self, index, agent, cwd, prompt):
         """Start a task on a machine, kept there, and show it beside the list."""
+        if index == "cloud":
+            await self._start_cloud(agent, cwd, prompt)
+            return
         source = self.sources[index]
         manager = source.manager
         try:
@@ -1561,6 +1592,22 @@ class FourtopApp(App[tuple | None]):
             return
         tag = f"{source.name}:new-{int(time.time())}"
         await self._launch(tag, argv, directory, env, f"{agent}: {prompt[:20]}", remote=manager.remote)
+
+    async def _start_cloud(self, agent, repo, prompt):
+        """A task in a sandbox: it clones the repository, the agent works there, and
+        `4top cloud done` brings the work home as a branch. It takes a while to start,
+        and the budget may refuse it before anything is created."""
+        from . import cloud
+        config = self.manager.config
+        self.set_status(f"Starting {agent} in the cloud on {repo} (about 20 s)…")
+        try:
+            task = await asyncio.to_thread(cloud.new, config, cloud.Request(agent, prompt, repo))
+            argv = await asyncio.to_thread(cloud.open_argv, config, task["name"])
+        except (FourtopError, OSError, ValueError) as exc:
+            self.set_status(f"Could not start in the cloud: {clean_text(str(exc))}")
+            return
+        await self._launch(f"cloud:{task['name']}", argv, str(Path.home()), {},
+                           f"{agent}: {prompt[:20]}", remote=True)
 
     def _hand_over(self, action, message: str, remote: bool = False):
         self.set_status(message)

@@ -2,7 +2,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
-from textual.widgets import Input, OptionList, Static
+from textual.widgets import Button, Input, OptionList, Select, Static
 
 from fourtop.app import (
     Confirm,
@@ -780,4 +780,37 @@ async def test_a_finished_session_looked_at_is_no_longer_news():
         await app.refresh_rows()
         await pilot.pause()
         assert headers()[0].startswith("✓ done")
+        await pilot.press("q")
+
+
+@pytest.mark.asyncio
+async def test_a_task_can_start_in_the_cloud(monkeypatch):
+    from types import SimpleNamespace as Namespace
+
+    from fourtop import cloud
+    from fourtop.app import Dispatch
+    from fourtop.config import Cloud
+
+    started = []
+    monkeypatch.setattr(cloud, "tasks", lambda config: ([{"repo": "octo/app"}], []))
+    monkeypatch.setattr(cloud, "new", lambda config, request: started.append(request) or {"name": "app"})
+    monkeypatch.setattr(cloud, "open_argv", lambda config, name: ["ssh", "sandbox", name])
+    manager = LocalDemo()
+    manager.config = Namespace(**vars(manager.config), cloud=Cloud(enabled=True))
+    workspace = FakeWorkspace()
+    app = FourtopApp(manager, workspace=workspace)
+    async with app.run_test(size=(100, 40)) as pilot:
+        await pilot.pause(.2)
+        await pilot.press("n")
+        await pilot.pause(.2)
+        dialog = app.screen
+        assert isinstance(dialog, Dispatch)
+        dialog.query_one("#host", Select).value = "cloud"
+        await pilot.pause(.3)
+        assert dialog.query_one("#cwd", Input).value == "octo/app", "earlier tasks' repositories first"
+        dialog.query_one("#prompt", Input).value = "fix the flaky test"
+        dialog.query_one("#start", Button).press()
+        await pilot.pause(.3)
+        assert started == [cloud.Request("claude", "fix the flaky test", "octo/app")]
+        assert [list(call[2]) for call in workspace.calls if call[0] == "open"] == [["ssh", "sandbox", "app"]]
         await pilot.press("q")
