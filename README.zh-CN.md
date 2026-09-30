@@ -170,6 +170,58 @@ agent。重复会被丢弃：同一会话十分钟内相同的消息，或二十
 在公共服务器上，主题是唯一的秘密：知道它的人可以读到这些消息（主机名、项目名、请求和
 agent 的最后一句话），也可以往里发。点通知打开的是 ntfy 而不是 Termux：ntfy 只能打开链接，
 而 Termux 没有注册能打开它的链接（只有广播给 Tasker 这类自动化 App 才行）。
+## 云端任务（E2B）
+
+干活的主力是家里的机器；它们休眠或忙不过来时，可以把任务派到云端：一个专属的
+[E2B](https://e2b.dev) 沙箱。只需要仓库地址就能发起，所以从任何地方都能派，平板也可以。
+
+```sh
+4top cloud new claude "fix the flaky retry test" --repo 4ier/app --ref main
+4top cloud ls                      # 状态、已花费、剩余时长、今天的花费
+4top cloud open app                # 查看它的 agent，或和它对话
+4top cloud done app --pr           # 推送分支 4top/app，开 PR，结束沙箱
+4top cloud pause app
+4top cloud rm app                  # 成果还没在 4top/app 上时拒绝；--discard 强制
+```
+
+一个任务 = 仓库 + ref + prompt。沙箱自己克隆仓库，新建分支 `4top/NAME`；agent 带着 prompt
+在沙箱自己的 agent tmux 里启动，和任何常驻 agent 的主机一样。没人接入时它照样干活，在面板里
+对它那一行按 Enter 就用 `4top attach` 接入。产出是推送上去的分支。`done` 提交 agent 留下的
+改动并推送，把沙箱快照保留 `keep_snapshot_days` 天，然后销毁沙箱。在某个克隆目录里运行时，
+`new` 默认用它的 origin 和当前分支，以已推送的为准；只在本设备上的改动不会带过去。
+
+费用有上限。沙箱运行不会超过 `max_minutes`；到点后它会暂停，成果保留，之后只有 `done` 或
+`rm` 能唤醒它。如果一个任务在最坏情况下会让今天的花费超过 `daily_budget_usd`，它在创建
+任何资源之前就会被拒绝。花费读自 E2B 自己记录的每个 4top 沙箱的运行时段，涵盖所有设备，
+按 E2B 公布的价格计算（2026-09-30 查得：每 vCPU 秒 $0.000014，每 GiB 秒 $0.0000045），
+所以是估算，以 E2B 的账单为准。暂停的沙箱不会被流量唤醒，刷新永远不花钱；只有你主动的操作
+（比如打开它）才会唤醒它。
+
+```toml
+[cloud]                   # 有这一节时，面板也会列出正在运行的任务
+template = "4top"         # 用 contrib/e2b 构建
+max_minutes = 60
+daily_budget_usd = 5.0
+keep_snapshot_days = 7
+```
+
+凭证来自发起任务的设备，只交给这一个任务：E2B key（`E2B_API_KEY` 或 `e2b auth login`）、
+GitHub token（`GH_TOKEN`、`GITHUB_TOKEN` 或 `gh auth token`），以及 agent 自己的凭证。
+Claude 用 `claude setup-token` 得到的 `CLAUDE_CODE_OAUTH_TOKEN`（或
+`~/.config/claude-code/oauth-token`）或 `ANTHROPIC_API_KEY`；Codex 用 `OPENAI_API_KEY`
+或 `auth.json`。GitHub token 只在克隆和推送时交给 git，从不写入磁盘。agent 的凭证只存在于
+它的进程里，`done` 在快照之前会停掉 agent 并删除这些凭证。E2B key 从不进入沙箱。设备靠
+ssh 公钥登录沙箱，本机需要 `websocat`（`brew install websocat`、`pkg install websocat`）。
+沙箱里的 agent 执行命令前不再逐条询问，因为沙箱里除了这个任务什么都没有。
+
+也可以把某个沙箱固定成主机。刷新永远不会唤醒它；打开其中一行会唤醒它，直到它的生命期结束：
+
+```toml
+[hosts.scratch]
+e2b = "SANDBOX_ID"
+```
+
+设计见 [docs/e2b-design.md](docs/e2b-design.md)。
 
 ## 命令行
 

@@ -27,6 +27,15 @@ COMMANDS = (
     ("attach", "Show a session's agent kept on this host, starting it if needed"),
     ("doctor", "Read dependency and source diagnostics"),
     ("notify", "Push notifications to a phone through ntfy (opt-in)"),
+    ("cloud", "Tasks in cloud sandboxes (E2B): a repository, a ref and a prompt"),
+)
+CLOUD = (
+    ("new", "Start a task: an agent on a repository's ref and a prompt, in a sandbox"),
+    ("ls", "List cloud tasks: state, cost so far, lifetime left, today's spending"),
+    ("open", "Attach to a task's agent, waking its sandbox within its lifetime"),
+    ("pause", "Pause a task's sandbox; it costs nothing while paused"),
+    ("done", "Push the task's work as branch 4top/NAME, keep a snapshot, end the sandbox"),
+    ("rm", "Remove a task; refused while its work is not on its branch"),
 )
 
 
@@ -99,6 +108,31 @@ def parser() -> argparse.ArgumentParser:
                              help="With --install/--uninstall: only this agent (repeatable)")
             sub.add_argument("--url", help="With --install: an ntfy topic URL instead of a new "
                                            "random topic on ntfy.sh")
+        if command == "cloud":
+            verbs = sub.add_subparsers(dest="verb", required=True)
+            for verb, verb_text in CLOUD:
+                cloud = verbs.add_parser(verb, help=verb_text)
+                _globals(cloud, suppress=True)
+                if verb == "new":
+                    cloud.add_argument("agent", choices=("claude", "codex"))
+                    cloud.add_argument("prompt")
+                    cloud.add_argument("--repo", help="Repository URL or GitHub owner/repo "
+                                                      "(default: this directory's origin)")
+                    cloud.add_argument("--ref", help="Branch, tag or commit to start from "
+                                                     "(default: this directory's branch, else the default)")
+                    cloud.add_argument("--name", help="Task name (default: the repository's)")
+                    cloud.add_argument("--open", action="store_true", help="Attach once it runs")
+                if verb in ("open", "pause", "done", "rm"):
+                    cloud.add_argument("name", help="A task, as `4top cloud ls` names it")
+                if verb == "done":
+                    cloud.add_argument("--pr", action="store_true", help="Also open a pull request")
+                    cloud.add_argument("--no-snapshot", action="store_true",
+                                       help="Keep no snapshot of the sandbox")
+                if verb == "rm":
+                    cloud.add_argument("--discard", action="store_true",
+                                       help="Remove it even though its work is not on its branch")
+                if verb in ("new", "ls", "done"):
+                    cloud.add_argument("--json", action="store_true")
     return ap
 
 
@@ -183,6 +217,71 @@ def _exec(argv: list[str]) -> int:
     raise AssertionError("exec failed to replace this process")
 
 
+def _minutes(seconds) -> str:
+    return "—" if seconds is None else f"{int(seconds) // 3600}h{int(seconds) // 60 % 60:02d}m"
+
+
+def _cloud(config: Config, args) -> int:
+    from . import cloud
+    if args.verb == "new":
+        repo, ref = args.repo, args.ref
+        if not repo:
+            repo, branch = cloud.origin(os.getcwd())
+            ref = ref or branch
+            cloud.say(f"working on {repo} at {ref or 'its default branch'} as pushed; "
+                      "what is only on this machine does not travel")
+        task = cloud.new(config, cloud.Request(args.agent, args.prompt, repo, ref or "", args.name or ""))
+        if args.json:
+            print(json.dumps(task, ensure_ascii=False))
+        else:
+            cloud.say(f"{task['name']} is working on {task['branch']}; it stops by {task['deadline']} "
+                      f"(about ${task['usd_per_hour']:.2f}/h, estimate). `4top cloud open {task['name']}` "
+                      f"watches it, `4top cloud done {task['name']}` brings the work home")
+        return _exec(cloud.open_argv(config, task["name"])) if args.open else 0
+    if args.verb == "ls":
+        rows, listing = cloud.tasks(config)
+        spending = cloud.budget(config, listing)
+        if args.json:
+            for row in rows:
+                print(json.dumps(row, ensure_ascii=False))
+            print(json.dumps({"budget": spending}, ensure_ascii=False))
+            return 0
+        for row in rows:
+            if row["state"] == "done":
+                print(f"{_clip(row['name'], 24)}  done     {row['branch']}  kept until {row['expires']}")
+                continue
+            cost = "?" if row["cost_usd"] is None else f"${row['cost_usd']:.3f}"
+            print(f"{_clip(row['name'], 24)}  {_clip(row['state'], 7)}  {cost:>6}  "
+                  f"{_minutes(row['lifetime_left'])} left  {row['branch'] or row['sandbox']}  "
+                  f"{_clip(row['prompt'], 50)}")
+        print(f"today ${spending['spent_today_usd']:.3f} of ${spending['daily_budget_usd']:.2f} "
+              f"(estimate from E2B's prices of {spending['prices_read']})")
+        return 0
+    if args.verb == "open":
+        return _exec(cloud.open_argv(config, args.name))
+    if args.verb == "pause":
+        cloud.pause(config, args.name)
+        cloud.say(f"{args.name} is paused; `4top cloud open {args.name}` resumes it")
+        return 0
+    if args.verb == "done":
+        result = cloud.done(config, args.name, pr=args.pr, snapshot=not args.no_snapshot)
+        if args.json:
+            print(json.dumps(result, ensure_ascii=False))
+        elif result["branch"]:
+            cloud.say(f"{args.name}: pushed {result['branch']} at {result['commit'][:12]}"
+                      + (f"; {result['pull_request']}" if result["pull_request"] else ""))
+        else:
+            cloud.say(f"{args.name} made no changes; nothing was pushed")
+        if not args.json and result["snapshot"]:
+            cloud.say(f"snapshot {result['snapshot']} is kept for "
+                      f"{config.cloud.keep_snapshot_days:g} days; the sandbox is gone")
+        return 0
+    if args.verb == "rm":
+        cloud.say(f"removed {cloud.remove(config, args.name, args.discard)}")
+        return 0
+    raise FourtopError("Unknown cloud operation", 2)
+
+
 def execute(args, extra: tuple[str, ...] = ()) -> int:
     if args.demo:
         if args.command not in (None, "list", "search", "preview"):
@@ -205,6 +304,9 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
             hosts = []
             if not manager.demo and not manager.remote:
                 hosts = [Manager(manager.config, host) for host in manager.config.hosts.values()]
+                if manager.config.cloud.enabled:
+                    from .cloud import sources
+                    hosts += [Manager(manager.config, host) for host in sources(manager.config)]
             workspace = None if manager.demo else Workspace.current(manager.config.environment)
             FourtopApp(manager, no_color=args.no_color or "NO_COLOR" in os.environ, hosts=hosts,
                        workspace=workspace).run()
@@ -261,6 +363,8 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                 return _exec(manager.remote_argv(remote))
             plan = manager.new(args.agent, args.cwd, extra)
             return _hand_over(manager, manager.keep(plan) if args.resident else plan)
+        if command == "cloud":
+            return _cloud(manager.config, args)
         if command == "resume":
             local = not manager.remote
             target = manager.resolve_history(args.key) if local else None
