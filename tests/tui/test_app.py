@@ -480,7 +480,7 @@ async def test_sessions_agents_started_for_themselves_are_hidden_until_asked():
     async with app.run_test(size=(100, 30)) as pilot:
         await pilot.pause(.2)
         assert manager.rows[1].key not in {row.key for row in app.shown}
-        await pilot.press("a")
+        await pilot.press("A")
         await pilot.pause()
         assert manager.rows[1].key in {row.key for row in app.shown}
         assert "with subagents" in str(app.query_one("#top", Static).render())
@@ -568,7 +568,7 @@ async def test_rows_say_what_each_session_is_doing_and_was_last_asked():
                 for key in ("demo_1", "demo_2", "demo_4", "demo_5")}
         assert "⟳ working" in text["demo_1"] and "fix/retry-jitter" in text["demo_1"]
         assert "› now add jitter to the backoff" in text["demo_1"], "the latest request, not the first"
-        assert "▶ your turn" in text["demo_2"]
+        assert "✓ done" in text["demo_2"], "a finished turn is done, not a question"
         assert "✗ stopped" in text["demo_4"], "working, but silent for two hours"
         assert "working" not in text["demo_5"] and "›" not in text["demo_5"]
         await pilot.press("q")
@@ -713,3 +713,42 @@ async def test_a_killed_link_to_a_host_that_keeps_agents_is_a_disconnect_not_an_
 
 def status_text(app) -> str:
     return str(app.query_one("#status", Static).render())
+
+
+class Machines(LocalDemo):
+    """Demo rows as two machines' worth of sessions for the Now view."""
+
+
+@pytest.mark.asyncio
+async def test_now_puts_what_needs_the_person_first_across_machines():
+    from datetime import datetime, timedelta, timezone
+
+    from fourtop.app import FourtopApp
+
+    now = datetime.now(timezone.utc)
+    here, there = LocalDemo(), LocalDemo()
+    type(there).scope = property(lambda self: "ubuntu")
+    old = (now - timedelta(days=30)).isoformat()
+    here.rows = [replace(here.rows[0], key="a", activity="waiting", last=now.isoformat()),
+                 replace(here.rows[1], key="b", activity="", last=old, title="ancient")]
+    there.rows = [replace(there.rows[0], key="c", attention="permission", host="ubuntu",
+                          last=(now - timedelta(hours=3)).isoformat()),
+                  replace(there.rows[1], key="d", activity="working", host="ubuntu",
+                          last=now.isoformat(), muted=True)]
+    app = FourtopApp(here, hosts=[there])
+    app.view = "now"
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause(.3)
+        keys = [row.key for row in app.shown]
+        assert keys == ["c", "a"], "needs-you first, done next; muted and month-old rows left out"
+        headers = [app.query_one(OptionList).get_option(i).prompt.plain for i in app._ids if i.startswith("h:")]
+        assert headers[0].startswith("‼ needs you") and headers[1].startswith("✓ done")
+        await pilot.press("slash")
+        app.query_one("#query", Input).value = "ancient"
+        await pilot.pause()
+        assert [row.key for row in app.shown] == ["b"], "search reaches the whole history"
+        await pilot.press("escape", "g")
+        await pilot.pause()
+        assert app.view == "machines" and {row.key for row in app.shown} >= {"a", "c"}
+        await pilot.press("q")
+    type(there).scope = LocalDemo.scope

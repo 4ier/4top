@@ -63,8 +63,12 @@ The panel also reads Cursor transcripts, but does not launch or resume Cursor.
 
 ## The daily loop
 
-Open `4top` and every machine is listed at once: this one first, then each
-configured host, most recent sessions first, each machine with its own page. Select
+Open `4top` and you see **Now**: every machine's sessions of this week in one list,
+most urgent first: `‼ needs you` (an agent is blocked on a permission prompt or a
+question, read from its screen on its host), `✓ done`, `⟳ working`, `✗ stopped`,
+then the rest of the week. Muted, scripted (`claude -p`, `codex exec`) and subagent
+sessions stay out of it; `/` searches everything. `g` switches to one section per
+machine, each with its own page. Select
 a session and press **Enter**. The machine that owns it checks that it can resume
 there, and the agent opens. There is no confirmation dialog, and a refusal (a
 missing CLI, a directory that is gone) appears in the list instead.
@@ -84,13 +88,18 @@ the list returns when it exits.
 | Key | Action |
 | --- | --- |
 | `↑` / `↓`, `Enter` | Select, open (or show, if it is already open) |
+| `g` | Switch between Now (every machine, most urgent first) and one section per machine |
+| `v`, `c` | Peek at a running agent's screen and reply there; reply in one line |
+| `y`, `d` | Approve or deny the permission prompt an agent is waiting on |
+| `n` | New task: machine, recent project, agent, what to do; kept on its host |
+| `R`, `x`, `X` | Name a session; mute it, or its whole project, from Now |
 | `→`, `Alt-←` / `Alt-→` | Move to the agent / between list and agent (tmux layout) |
-| `[` / `]` | Previous / next page of the machine under the cursor |
-| `/`, `Enter`, `Esc` | Search metadata, return to the list, clear search and filters |
-| `p`, `f`, `a` | Show one project; fold the machine under the cursor; show subagent sessions |
+| `[` / `]`, `f` | Previous / next page and fold (per-machine view) |
+| `/`, `Enter`, `Esc` | Search everything, return to the list, clear search and filters |
+| `p`, `A` | Show one project; show scripted and subagent sessions too |
 | `Ctrl-F` | Explicit literal full-content search; `Esc` cancels |
 | `Space`, `i` | Latest messages (read-only; `e` for earlier), details |
-| `n`, `r`, `?` | New agent on the selected machine, refresh, help |
+| `r`, `?` | Refresh, help |
 | `q`, `Q`, `Ctrl-C` | Detach (tmux) or quit; close all agents and quit |
 
 Each row says what the session is doing, from the end of its transcript: `⟳ working`

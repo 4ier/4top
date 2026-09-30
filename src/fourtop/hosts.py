@@ -137,7 +137,13 @@ def row_from(host: Host, payload: dict, number: int = 0) -> Session:
             activity=str(payload.get("activity") or ""),
             last_request=str(payload.get("last_request") or ""),
             branch=str(payload.get("branch") or ""),
-            resident=payload.get("resident") is True)
+            resident=payload.get("resident") is True,
+            attention=str(payload.get("attention") or ""),
+            label=str(payload.get("label") or ""),
+            muted=payload.get("muted") is True,
+            repo=str(payload.get("repo") or ""),
+            changes=payload.get("changes") if isinstance(payload.get("changes"), dict) else {},
+            scripted=payload.get("scripted") is True)
     except (KeyError, TypeError, ValueError):
         raise Unavailable(f"{host.name}: row {number} is missing required fields") from None
 

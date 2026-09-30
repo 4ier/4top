@@ -74,6 +74,17 @@ class Session:
     # An agent for this session runs in its host's agent server now (fourtop.resident),
     # as tmux on that host answered; nothing is recorded.
     resident: bool = False
+    # From the host (the redesign's shared contract): the agent is blocked on the
+    # person ("permission" / "question"), a name the person gave it, hidden from Now,
+    # the repository it belongs to, and what its working tree changed.
+    attention: str = ""
+    label: str = ""
+    muted: bool = False
+    repo: str = ""
+    changes: dict = field(default_factory=dict, compare=False)
+    # Started without a person at the keyboard (claude -p, codex exec): hidden by
+    # default like subagents, since nobody resumes those by hand either.
+    scripted: bool = False
 
     def json(self) -> dict[str, Any]:
         result = asdict(self)
