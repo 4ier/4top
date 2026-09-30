@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- An agent started with a task has a row at once, before it writes a transcript.
+  Claude writes none while it waits at its folder-trust dialog, which is exactly
+  when it needs the person; its row now shows "needs you", opens, and `y` answers it.
+- Prompts are recognised in a narrow window: agents wrap their text to a phone's
+  width, so prompt shapes match only line starts and lines too short to wrap.
 - Fixed: over ssh a Mac's PATH lacks Homebrew, so its tmux was not found and an
   agent started or opened from another device ran in the ssh connection instead of
   being kept (and could not be peeked, answered or approved). tmux is now also
