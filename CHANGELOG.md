@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 4top 0.2.0a8 — 2026-09-30
 
 - A remote session whose ssh was killed (by Android, by Termux) says "Disconnected"
   on a host that keeps agents, like a dropped link: the agent keeps running there.
