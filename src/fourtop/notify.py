@@ -312,8 +312,10 @@ def from_hook(config_path: str | None, agent: str, extra: tuple[str, ...], detac
 def launcher(env: dict[str, str] | None = None) -> list[str]:
     """This host's 4top as an absolute command that works without a login shell.
 
-    The script that is running now if it is called 4top (a uv or pip entry point, or
-    a wrapper), else 4top on PATH, else this interpreter with the module.
+    The script that is running now if it is called 4top (a uv or pip entry point),
+    else 4top on PATH, else ~/.local/bin/4top, where uv, pipx and hand-made wrappers
+    put it but where a non-interactive ssh session's PATH does not look. Last, this
+    interpreter with the module, and the PYTHONPATH that found it.
     """
     env = os.environ if env is None else env
     argv0 = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
@@ -324,7 +326,12 @@ def launcher(env: dict[str, str] | None = None) -> list[str]:
     found = shutil.which("4top", path=env.get("PATH"))
     if found:
         return [os.path.abspath(found)]
-    return [sys.executable, "-m", "fourtop"]
+    home = env.get("HOME")
+    local = Path(home) / ".local/bin/4top" if home else None
+    if local is not None and local.is_file() and os.access(local, os.X_OK):
+        return [str(local)]
+    path = env.get("PYTHONPATH")
+    return [*(["/usr/bin/env", f"PYTHONPATH={path}"] if path else []), sys.executable, "-m", "fourtop"]
 
 
 def hook_argv(base: list[str], config_path: str | None, agent: str) -> list[str]:

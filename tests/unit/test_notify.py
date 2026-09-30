@@ -307,6 +307,19 @@ def test_pi_extension_is_ours_alone(tmp_path):
         notify.pi(extensions, argv)
 
 
+def test_the_hook_names_4top_absolutely_even_off_path(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["/src/fourtop/__main__.py"])
+    local = tmp_path / ".local/bin/4top"
+    env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "PYTHONPATH": "/src"}
+    assert notify.launcher(env) == ["/usr/bin/env", "PYTHONPATH=/src", sys.executable, "-m", "fourtop"]
+    local.parent.mkdir(parents=True)
+    local.write_text("#!/bin/sh\n")
+    local.chmod(0o755)
+    assert notify.launcher(env) == [str(local)]    # a wrapper there, as on a git checkout
+    monkeypatch.setattr(sys, "argv", ["/opt/uv/bin/4top"])
+    assert notify.launcher(env) == [str(local)]    # not executable at that path: skipped
+
+
 def test_install_records_a_random_topic_and_wires_the_agents_present(lab, capsys):
     home = Path(lab.env["HOME"])
     (home / ".claude").mkdir()
