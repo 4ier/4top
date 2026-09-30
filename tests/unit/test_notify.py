@@ -164,6 +164,23 @@ def test_repeats_and_bursts_are_dropped_but_needing_you_is_not(lab, ntfy):
     assert len(ntfy.received) == 4
 
 
+def test_a_muted_session_or_project_sends_nothing(lab, ntfy):
+    claude_session(lab, NATIVE, lab.path)
+    config = configured(lab, ntfy.url)
+    stop = {"hook_event_name": "Stop", "session_id": NATIVE, "last_assistant_message": "done"}
+    (record,) = lab.manager.history(force=True).records
+    lab.manager.mute(record.key)
+    assert not notify.deliver(config, "claude", stop, manager=lab.manager)
+    lab.manager.mute(record.key, False)
+    lab.manager.mute_project(str(lab.path))
+    assert not notify.deliver(config, "claude", stop, manager=lab.manager)
+    assert not notify.deliver(config, "claude", {**stop, "session_id": "unknown", "cwd": str(lab.path)},
+                              manager=lab.manager), "a session not found yet is muted by its directory"
+    lab.manager.mute_project(str(lab.path), False)
+    assert notify.deliver(config, "claude", stop, manager=lab.manager)
+    assert len(ntfy.received) == 1
+
+
 def test_events_not_chosen_are_not_sent(lab, ntfy):
     config = configured(lab, ntfy.url, 'events = ["needs-you"]\n')
     assert not notify.deliver(config, "claude", {"hook_event_name": "Stop", "session_id": NATIVE},

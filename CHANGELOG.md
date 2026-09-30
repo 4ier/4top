@@ -70,6 +70,7 @@
   permission prompt is on screen); `label`, `mute` and `unmute` (a session, or
   `--project DIR`); `projects` lists recent project directories; `new --prompt TEXT`
   starts an agent with its first request.
+- A muted session, or one in a muted project, sends no notification either.
 
 ## 4top 0.2.0a8 — 2026-09-30
 

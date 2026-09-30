@@ -227,7 +227,8 @@ A hook returns at once and sends from a detached process with a five-second limi
 so an unreachable server never holds up or fails the agent. Repeats are dropped: the
 same message about a session within ten minutes, or any within twenty seconds unless
 it newly needs you. Sessions started by a script (`claude -p`, `codex exec`) or by
-another agent are not reported, as far as the host's session-ls can tell them apart.
+another agent are not reported, as far as the host's session-ls can tell them apart,
+and neither is a session you muted, or one in a project you muted (`4top mute`).
 
 On a public server the topic is the only secret: anyone who knows it can read the
 messages (host and project names, the request and the agent's last words) and send to
