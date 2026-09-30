@@ -48,10 +48,14 @@ HOLD_ORDER = 3.0  # seconds after an input during which rows do not move
 
 
 def when(last: str) -> str:
-    """How long ago, as the list shows it: "now" for the last minute, so a busy
-    session does not repaint the list every second."""
+    """How long ago, as the list shows it: "now" for the last minute and whole hours
+    after the first, so the list is not rebuilt every time some row's minute ticks
+    (with eighty rows, that was every second or two)."""
     label = age(last)
-    return "now" if label.endswith("s") and label[:-1].isdigit() else label
+    if label.endswith("s") and label[:-1].isdigit():
+        return "now"
+    hours, _, minutes = label.partition("h")
+    return f"{hours}h" if minutes.endswith("m") and hours.isdigit() else label
 
 
 STALE_WORKING = 600  # a turn with no write for this long has stopped, not paused

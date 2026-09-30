@@ -200,3 +200,27 @@ def test_an_older_host_is_not_asked_to_attach(fake, tmp_path):
     sync = SyncState(tmp_path / "venus.json", "me@venus")
     hosts.remote_snapshot(None, HOST, sync)
     assert not sync.attach
+
+
+
+def test_an_unchanged_refresh_does_not_write_the_cache(fake, tmp_path, monkeypatch):
+    fake([row("a", "2026-09-28T10:00:00+00:00"), row("b", "2026-09-27T10:00:00+00:00")])
+    sync = SyncState(tmp_path / "venus.json", "me@venus")
+    hosts.remote_snapshot(None, HOST, sync)
+    saved = []
+    monkeypatch.setattr(SyncState, "save", lambda self: saved.append(1))
+    hosts.remote_snapshot(None, HOST, sync)
+    assert saved == [], "the row at the cursor came again, unchanged"
+
+
+def test_rows_that_did_not_change_are_not_fingerprinted_again(monkeypatch):
+    from fourtop import sync as sync_module
+    rows = {"a": row("a", "2026-09-28T10:00:00+00:00").json(), "b": row("b", "2026-09-27T10:00:00+00:00").json()}
+    sync = SyncState(None)
+    first = sync.fingerprints(rows)
+    printed = []
+    real = sync_module.fingerprint
+    monkeypatch.setattr(sync_module, "fingerprint", lambda p: printed.append(p["key"]) or real(p))
+    changed = {**rows, "b": {**rows["b"], "title": "more"}}
+    again = sync.fingerprints(changed)
+    assert printed == ["b"] and again["a"] == first["a"] and again["b"] != first["b"]

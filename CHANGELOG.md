@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- A quieter idle panel: ages past the first hour show whole hours, so the list is
+  not rebuilt every time some row's minute ticks; a remote refresh that changed
+  nothing no longer rewrites that host's cache, and only rows that changed are
+  fingerprinted again. With session-ls's cheaper scan, an idle panel on a Mac with
+  2,800 sessions and two hosts uses about 2–3% of a core instead of 5–6%.
 - `v` on a session with no agent running shows its latest messages instead of only
   saying there is no agent.
 - Down or Up in the search box goes into the results, like Enter.

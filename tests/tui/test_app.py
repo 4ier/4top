@@ -846,3 +846,15 @@ async def test_down_from_the_search_box_goes_into_the_results():
         await pilot.pause()
         assert app.focused is app.query_one("#list", OptionList)
         await pilot.press("q")
+
+
+def test_ages_past_the_first_hour_are_whole_hours():
+    from datetime import datetime, timedelta, timezone
+
+    from fourtop.app import when
+
+    now = datetime.now(timezone.utc)
+    assert when(now.isoformat()) == "now"
+    assert when((now - timedelta(minutes=5, seconds=3)).isoformat()) == "5m"
+    assert when((now - timedelta(hours=2, minutes=41)).isoformat()) == "2h"
+    assert when((now - timedelta(days=3)).isoformat()) == "3d"
