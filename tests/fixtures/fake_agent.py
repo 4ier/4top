@@ -48,7 +48,7 @@ else:
     records = [{"type": "session", "id": native, "cwd": os.getcwd(), "timestamp": now},
                {"type": "message", "message": {"role": "user", "content": [{"type": "text", "text": text}]}}]
 source.parent.mkdir(parents=True, exist_ok=True)
-if not source.exists():
+if not source.exists() and not os.environ.get("FAKE_NO_TRANSCRIPT"):  # e.g. at a trust dialog
     source.write_text("".join(json.dumps(row) + "\n" for row in records), encoding="utf-8")
 reports = Path(os.environ["FAKE_REPORTS"])
 reports.mkdir(parents=True, exist_ok=True)

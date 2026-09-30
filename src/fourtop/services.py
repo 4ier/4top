@@ -114,6 +114,7 @@ class Manager:
         self._history_lock = threading.Lock()
         self.stop_event = threading.Event()
         self._running, self._running_at = set(), float("-inf")
+        self._unwritten: list[Session] = []  # agents started here with no transcript yet
         self._signals: dict[str, dict] = {}
         self.marks = Marks(self.store)
         if host is None:
@@ -199,6 +200,7 @@ class Manager:
         signals = self._signals
         rows = [replace(row, **signals[row.key]) if row.key in signals else row
                 for row in self._rows] if signals else list(self._rows)
+        rows = self._unwritten + rows
         return Snapshot(rows, list(dict.fromkeys(history.issues)), history.observed_at, "local")
 
     def _read_signals(self, rows: list[Session]) -> dict[str, dict]:
@@ -213,8 +215,17 @@ class Manager:
             self._running = (self._running - set(renamed)) | {resident.session_name(key)
                                                               for key in renamed.values()}
         by_name = {resident.session_name(row.key): row.key for row in rows} if self._running else {}
+        unwritten = {name: item for name, item in resident.unwritten(self.config, self._running).items()
+                     if name not in by_name} if self._running else {}
+        screens = resident.screens(env, (set(by_name) & self._running) | set(unwritten))
         waiting = {by_name[name]: prompts.attention(screen)
-                   for name, screen in resident.screens(env, set(by_name) & self._running).items()}
+                   for name, screen in screens.items() if name in by_name}
+        self._unwritten = [
+            Session(name, item["agent"], item["cwd"], item["title"] or f"new {item['agent']} session",
+                    item["started"], item["started"], resident=True,
+                    attention=prompts.attention(screens.get(name, "")),
+                    repo=gitinfo.repo_of(item["cwd"]))
+            for name, item in unwritten.items()]
         marks = self.marks.load()
         recent, since = {}, _since(CHANGES_WINDOW)
         for row in rows:
@@ -332,6 +343,13 @@ class Manager:
         if self.host is not None:
             self.wake()
             return remote_check(self.config, self.host, query)
+        early = self._unwritten_row(query)
+        if early is not None:
+            # Running here before its first transcript write: opening it attaches.
+            return {"key": early.key, "agent": early.agent, "host": "local", "native_id": None,
+                    "cwd": early.cwd, "cwd_quality": "native", "executable": None,
+                    "cwd_missing": False, "resumable": True, "reason": None,
+                    "status": early.status, "problems": []}
         record = self.resolve_history(query)
         executable, reason = None, None
         if record.agent == "cursor":
@@ -377,6 +395,11 @@ class Manager:
         first if none is running. Without tmux this is a plain resume."""
         if self.host is not None:
             raise Missing("Attaching to a session on another host runs there; see remote_argv")
+        early = self._unwritten_row(query)
+        if early is not None:
+            plan = resident.attach(self.config, resident.session_name(early.key), early.agent)
+            if plan is not None:
+                return plan
         record = self.resolve_history(query)
         name = resident.session_name(record.key)
         running = resident.running(self.config.environment)
@@ -390,9 +413,24 @@ class Manager:
                 return plan
         return resident.keep(self.config, self.drivers.plan_resume(record, cwd), name)
 
-    def keep(self, plan: LaunchPlan) -> LaunchPlan:
-        """A planned agent, started in this host's agent server instead of this terminal."""
-        return resident.keep(self.config, plan)
+    def _unwritten_row(self, query: str) -> Session | None:
+        """The row of an agent started here that has not written a transcript yet."""
+        if self.host is not None:
+            return None
+        running = resident.running(self.config.environment)
+        name = resident.session_name(query)
+        if name not in running or name not in resident.unwritten(self.config, running):
+            return None
+        if any(resident.session_name(record.key) == name for record in self.history().records):
+            return None
+        item = resident.unwritten(self.config, running)[name]
+        return Session(name, item["agent"], item["cwd"], item["title"], item["started"],
+                       item["started"], resident=True)
+
+    def keep(self, plan: LaunchPlan, title: str | None = None) -> LaunchPlan:
+        """A planned agent, started in this host's agent server instead of this terminal.
+        ``title`` marks a new one (its first request, or "")."""
+        return resident.keep(self.config, plan, title=title)
 
     def remote_argv(self, args: list[str]) -> list[str]:
         if self.host is None:
@@ -545,7 +583,7 @@ class Manager:
             raise Missing("Starting an agent on another host runs there; see remote_argv")
         if not prompt or not prompt.strip():
             raise FourtopError("Say what the agent should do", 2)
-        return resident.keep(self.config, self.drivers.plan_new(agent, cwd, (), prompt))
+        return resident.keep(self.config, self.drivers.plan_new(agent, cwd, (), prompt), title=prompt)
 
     def run(self, plan: LaunchPlan) -> int:
         """Run a native agent in the current terminal and return when it exits."""

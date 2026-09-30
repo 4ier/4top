@@ -20,7 +20,10 @@ import subprocess
 import time
 import uuid
 from dataclasses import replace
+from datetime import datetime, timezone
 from pathlib import Path
+
+from session_ls.storage import atomic_json, read_json
 
 from .config import Config
 from .errors import Conflict, Missing
@@ -116,17 +119,23 @@ def attach(config: Config, name: str, agent: str) -> LaunchPlan | None:
                       str(Path.home()), env)
 
 
-def keep(config: Config, plan: LaunchPlan, name: str | None = None) -> LaunchPlan:
+def keep(config: Config, plan: LaunchPlan, name: str | None = None,
+         title: str | None = None) -> LaunchPlan:
     """The same agent, started in this host's agent server and shown from there.
 
     ``new-session -A`` attaches instead if the session appeared in the meantime, so
     two devices opening it at once still share one agent. Without tmux the plan is
     returned unchanged: the agent runs in this terminal, as it always did.
+
+    A new agent (``title`` given: its first request, or "") is remembered until it
+    writes a transcript, so it has a row meanwhile (see ``unwritten``).
     """
     tmux = tmux_binary(config.environment)
     if tmux is None:
         return plan
     name = name or session_name(plan.history_key or f"new-{plan.agent}-{uuid.uuid4().hex[:8]}")
+    if title is not None:
+        remember(config, name, plan.agent, plan.cwd, title)
     base, env, server = _prepare(config, tmux)
     # A new server takes this client's environment. A running one was started by an
     # earlier connection, so whatever the plan needs differently is passed along.
@@ -137,6 +146,49 @@ def keep(config: Config, plan: LaunchPlan, name: str | None = None) -> LaunchPla
     argv = (*base, "new-session", "-A", "-s", name, "-c", plan.cwd, "--", *command)
     return replace(plan, executable=tmux, argv=argv, environment=env)
 
+
+
+# An agent started here has no transcript until it writes one, and Claude writes
+# none while it waits at its folder-trust dialog, which is exactly when it needs the
+# person. Until then its row comes from what was known when it started.
+PENDING_SCHEMA = 1
+PENDING_DAYS = 2  # an agent that never wrote anything in this long is forgotten
+
+
+def remember(config: Config, name: str, agent: str, cwd: str, title: str) -> None:
+    path = Path(config.state_dir) / "pending.json"
+    try:
+        known = _pending(path)
+        known[name] = {"agent": agent, "cwd": cwd, "title": title,
+                       "started": datetime.now(timezone.utc).isoformat()}
+        atomic_json(path, {"schema_version": PENDING_SCHEMA, "sessions": known})
+    except (OSError, ValueError):
+        pass  # the row waits for the transcript instead
+
+
+def _pending(path: Path) -> dict[str, dict]:
+    value = read_json(path, None)
+    if not isinstance(value, dict) or value.get("schema_version") != PENDING_SCHEMA:
+        return {}
+    cutoff = time.time() - PENDING_DAYS * 86400
+    found = {}
+    for name, item in (value.get("sessions") or {}).items():
+        try:
+            if datetime.fromisoformat(item["started"]).timestamp() >= cutoff:
+                found[str(name)] = {k: str(item[k]) for k in ("agent", "cwd", "title", "started")}
+        except (KeyError, TypeError, ValueError):
+            continue
+    return found
+
+
+def unwritten(config: Config, running: set[str]) -> dict[str, dict]:
+    """Agents started here and running now, by session name: agent, cwd, title and
+    started. The caller drops the ones whose transcript has a row by now."""
+    try:
+        known = _pending(Path(config.state_dir) / "pending.json")
+    except (OSError, ValueError):
+        return {}
+    return {name: item for name, item in known.items() if name in running}
 
 
 NEW_PREFIX = "new-"  # a session started before its agent had a history key (Codex)

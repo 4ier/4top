@@ -32,25 +32,29 @@ class Prompt:
 
 
 PROMPTS = (
+    # Patterns match line starts only: agents wrap their text to the window, and a
+    # phone's window is narrow.
     # Claude Code 2.1: "Do you want to proceed?" / "Do you want to create w.txt?" and so
     # on, numbered options with "1. Yes" first. "1" chooses it; Esc cancels (and tells
     # Claude the person declined).
     Prompt("claude-permission", "claude", "permission",
-           (r"^\s*Do you want to .*\?\s*$", r"^\s*(?:❯\s*)?1\.\s+Yes\b"),
+           (r"^\s*Do you want to\b", r"^\s*(?:❯\s*)?1\.\s+Yes\b"),
            r"^\s*Esc to cancel\b", approve=("1",), deny=("Escape",)),
     # Starting in a directory Claude has not seen asks whether to trust it. The cursor
-    # starts on "No, exit"; Down selects "Yes, I trust this folder".
+    # starts on "No, exit"; Down selects "Yes, I trust this folder". Claude wraps its
+    # text to the window, and a phone's window is narrow, so only lines too short to
+    # wrap are matched.
     Prompt("claude-trust", "claude", "permission",
-           (r"one you trust\?|Do you trust the files in this folder\?", r"^\s*❯\s*No, exit\s*$"),
-           r"^\s*Enter to confirm · Esc to cancel", approve=("Down", "Enter"), deny=("Escape",)),
+           (r"^\s*❯\s*No, exit\s*$", r"^\s*Yes, I trust this folder\s*$"),
+           r"^\s*Enter to confirm\b", approve=("Down", "Enter"), deny=("Escape",)),
     # AskUserQuestion: numbered choices the person picks from. Not a permission.
     Prompt("claude-question", "claude", "question", (r"^\s*(?:❯\s*)?1\.\s+\S",),
            r"^\s*Enter to select\b.*Esc to cancel"),
     # Codex 0.157/0.158: "Would you like to run the following command?" / "... make the
     # following edits?", with "1. Yes, proceed (y)". "y" is its shortcut; Esc declines.
     Prompt("codex-approval", "codex", "permission",
-           (r"^\s*Would you like to .*\?\s*$", r"^\s*(?:›\s*)?1\.\s+Yes, proceed \(y\)"),
-           r"^\s*Press enter to confirm or esc to cancel", approve=("y",), deny=("Escape",)),
+           (r"^\s*Would you like to\b", r"^\s*(?:›\s*)?1\.\s+Yes, proceed \(y\)"),
+           r"^\s*Press enter to confirm\b", approve=("y",), deny=("Escape",)),
     # Codex asks to trust a new folder before it starts; Enter takes the highlighted
     # "Trust and continue".
     Prompt("codex-trust", "codex", "permission",

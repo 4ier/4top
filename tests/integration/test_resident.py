@@ -192,3 +192,19 @@ def test_talking_to_a_session_without_a_kept_agent_is_refused(host):
     for command in (["peek", "h_0123456789"], ["send", "h_0123456789", "hi"], ["approve", "h_0123456789"]):
         result = lab.cli(*command)
         assert result.returncode == 3 and "runs on this host now" in result.stderr
+
+
+def test_an_agent_with_no_transcript_yet_has_a_row_and_can_be_answered(host):
+    # Claude writes nothing while it waits at its folder-trust dialog: the moment it
+    # most needs the person, it would have no row at all.
+    lab, device = host
+    lab.env["FAKE_SCREEN"] = str(SCREENS / "claude-trust.txt")
+    lab.env["FAKE_NO_TRANSCRIPT"] = "1"
+    device("new", "pi", "--cwd", str(lab.path), "--prompt", "tidy the tests", "--resident")
+    agent = eventually(lambda: reports(lab))[0]
+    row = eventually(lambda: [r for r in map(json.loads, lab.cli("list", "--json").stdout.splitlines())
+                              if r["resident"]])[0]
+    assert row["title"] == "tidy the tests" and row["attention"] and row["cwd"] == str(lab.path)
+    assert lab.cli("check", row["key"]).returncode == 0, "opening it attaches"
+    assert lab.cli("approve", row["key"]).returncode == 0
+    eventually(lambda: [r for r in reports(lab) if r["pid"] == agent["pid"] and r.get("typed")])

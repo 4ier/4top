@@ -25,6 +25,7 @@ EXPECTED = {
     "claude-bash-permission.txt": "claude-permission",
     "claude-write-permission.txt": "claude-permission",
     "claude-trust.txt": "claude-trust",
+    "claude-trust-narrow.txt": "claude-trust",  # a phone-sized window: Claude wraps its text
     "claude-question.txt": "claude-question",
     "codex-exec-approval.txt": "codex-approval",
     "codex-exec-approval-2.txt": "codex-approval",

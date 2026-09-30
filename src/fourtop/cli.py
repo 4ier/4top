@@ -389,7 +389,7 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                           + (["--", *extra] if extra else []))
                 return _exec(manager.remote_argv(remote))
             plan = manager.new(args.agent, args.cwd, extra, args.prompt)
-            kept = manager.keep(plan) if args.resident else plan
+            kept = manager.keep(plan, title=args.prompt or "") if args.resident else plan
             if args.resident and kept is plan:
                 print("4top: no tmux on this host, so this agent runs in this connection "
                       "and ends with it", file=sys.stderr)
