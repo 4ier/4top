@@ -715,10 +715,6 @@ def status_text(app) -> str:
     return str(app.query_one("#status", Static).render())
 
 
-class Machines(LocalDemo):
-    """Demo rows as two machines' worth of sessions for the Now view."""
-
-
 @pytest.mark.asyncio
 async def test_now_puts_what_needs_the_person_first_across_machines():
     from datetime import datetime, timedelta, timezone
@@ -726,8 +722,10 @@ async def test_now_puts_what_needs_the_person_first_across_machines():
     from fourtop.app import FourtopApp
 
     now = datetime.now(timezone.utc)
-    here, there = LocalDemo(), LocalDemo()
-    type(there).scope = property(lambda self: "ubuntu")
+    class Ubuntu(LocalDemo):
+        scope = "ubuntu"
+
+    here, there = LocalDemo(), Ubuntu()
     old = (now - timedelta(days=30)).isoformat()
     here.rows = [replace(here.rows[0], key="a", activity="waiting", last=now.isoformat()),
                  replace(here.rows[1], key="b", activity="", last=old, title="ancient")]
@@ -751,4 +749,35 @@ async def test_now_puts_what_needs_the_person_first_across_machines():
         await pilot.pause()
         assert app.view == "machines" and {row.key for row in app.shown} >= {"a", "c"}
         await pilot.press("q")
-    type(there).scope = LocalDemo.scope
+
+
+@pytest.mark.asyncio
+async def test_a_finished_session_looked_at_is_no_longer_news():
+    from datetime import datetime, timedelta, timezone
+
+    from fourtop.app import FourtopApp
+
+    now = datetime.now(timezone.utc)
+    saved = {}
+    here = LocalDemo()
+    here.store = SimpleNamespace(load_view=lambda: {}, save_view=lambda selected: None,
+                                 load_seen=lambda: {}, save_seen=saved.update)
+    finished = (now - timedelta(hours=1)).isoformat()
+    here.rows = [replace(here.rows[0], key="a", activity="waiting", last=finished)]
+    app = FourtopApp(here)
+    app.view = "now"
+    async with app.run_test(size=(120, 30)) as pilot:
+        await pilot.pause(.3)
+        headers = lambda: [app.query_one(OptionList).get_option(i).prompt.plain  # noqa: E731
+                           for i in app._ids if i.startswith("h:")]
+        assert headers()[0].startswith("✓ done")
+        source, row = app._row_and_source()
+        app.mark_seen(source, row)
+        await pilot.pause()
+        assert headers()[0].startswith("· this week") and saved == {"local:a": finished}
+        # The agent writes again: it is news again.
+        here.rows = [replace(row, last=now.isoformat())]
+        await app.refresh_rows()
+        await pilot.pause()
+        assert headers()[0].startswith("✓ done")
+        await pilot.press("q")

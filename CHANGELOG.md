@@ -5,7 +5,8 @@
 - **Now.** The panel opens on one list across every machine, most urgent first:
   needs you, done, working, stopped, then the rest of the week. "Your turn" is now
   "done": on a day of real sessions none of the turns it named asked the person
-  anything. Muted, scripted and subagent sessions stay out; `/` searches everything;
+  anything. A finished session you have opened or peeked leaves "done" until the
+  agent writes again. Muted, scripted and subagent sessions stay out; `/` searches everything;
   `g` returns to one section per machine.
 - **Act from the list.** `v` shows a running agent's screen with a reply line, `c`
   replies, `y`/`d` approve or deny, `R` names a session, `x`/`X` mute it or its project,

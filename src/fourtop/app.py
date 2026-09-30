@@ -675,7 +675,10 @@ class FourtopApp(App[tuple | None]):
         self._full_running = False
         self._fourtop_closing = False
         self._status_message = ""
+        self.seen: dict[str, str] = {}  # tag -> `last` when the person last looked at it
         if not manager.demo:
+            with contextlib.suppress(OSError, FourtopError, AttributeError):
+                self.seen = manager.store.load_seen()
             saved = manager.store.load_view().get("selected")
             self.selected_key = f"local:{saved}" if saved else None
 
@@ -957,6 +960,8 @@ class FourtopApp(App[tuple | None]):
                 if not searching and (getattr(row, "muted", False)
                                       or not (recent or row.resident or badge == "‼ needs you")):
                     continue
+                if badge == "✓ done" and self.seen.get(f"{source.name}:{row.key}", "") >= row.last:
+                    badge = ""  # already looked at since it finished: not news
                 group = next(name for name, badges in URGENCY if badge in badges)
                 groups[group].append((source, row))
         layout, rows = [], {}
@@ -1219,9 +1224,23 @@ class FourtopApp(App[tuple | None]):
         self.set_status(f"{'Every machine, its own pages' if self.view == 'machines' else 'Now: most urgent first'} · g switches")
         self.render_list()
 
+    def mark_seen(self, source, row: Session):
+        """A finished session the person has looked at is no longer "done" news in Now,
+        until the agent writes again."""
+        tag = f"{source.name}:{row.key}"
+        if self.manager.demo or self.seen.get(tag, "") >= row.last:
+            return
+        self.seen[tag] = row.last
+        with contextlib.suppress(OSError, FourtopError, AttributeError):
+            self.manager.store.save_seen(self.seen)
+        # The row moves out of "done"; the highlight goes with it, not to the new top.
+        self.selected_key, self._following_top, self._signature = tag, False, None
+        self.render_list()
+
     def action_peek(self):
         source, row = self._row_and_source()
         if row:
+            self.mark_seen(source, row)
             self._modal(Peek(self, source, row))
 
     def action_reply(self):
@@ -1437,6 +1456,7 @@ class FourtopApp(App[tuple | None]):
         tag = f"{source.name}:{row.key}"
         if tag in self.busy:
             return
+        self.mark_seen(source, row)
         pane = self.opened.get(tag)
         if pane is not None and self.workspace:
             await asyncio.to_thread(self.workspace.show, pane.id)
