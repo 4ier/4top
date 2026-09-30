@@ -1,7 +1,7 @@
 """4top's own metadata; native transcripts are never written here.
 
-Only two things are durable now: the local identity that scopes history keys, and
-the view preference. There is no runtime state to keep, because 4top does not own
+Only three things are durable now: the local identity that scopes history keys,
+the view preference, and which finished sessions the person has already looked at. There is no runtime state to keep, because 4top does not own
 a process.
 """
 from __future__ import annotations
@@ -17,6 +17,8 @@ from .errors import Unavailable
 
 SCHEMA = 1
 VIEW_SCHEMA = 3
+SEEN_SCHEMA = 1
+SEEN_LIMIT = 2000  # the most recent looks are enough; older rows are history anyway
 
 
 class StateStore:
@@ -51,3 +53,19 @@ class StateStore:
         with self.lock("view"):
             atomic_json(self.directory / "view.json",
                         {"schema_version": VIEW_SCHEMA, "selected": selected})
+
+    def load_seen(self) -> dict[str, str]:
+        """Panel tag -> the `last` of the row when the person last opened or peeked it."""
+        try:
+            value = read_json(self.directory / "seen.json", {})
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(value, dict) or value.get("schema_version") != SEEN_SCHEMA:
+            return {}
+        seen = value.get("seen")
+        return {str(k): str(v) for k, v in seen.items()} if isinstance(seen, dict) else {}
+
+    def save_seen(self, seen: dict[str, str]) -> None:
+        recent = dict(sorted(seen.items(), key=lambda item: item[1])[-SEEN_LIMIT:])
+        with self.lock("seen"):
+            atomic_json(self.directory / "seen.json", {"schema_version": SEEN_SCHEMA, "seen": recent})

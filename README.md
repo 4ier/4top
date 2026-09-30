@@ -65,7 +65,8 @@ The panel also reads Cursor transcripts, but does not launch or resume Cursor.
 
 Open `4top` and you see **Now**: every machine's sessions of this week in one list,
 most urgent first: `‼ needs you` (an agent is blocked on a permission prompt or a
-question, read from its screen on its host), `✓ done`, `⟳ working`, `✗ stopped`,
+question, read from its screen on its host), `✓ done` (finished since you last
+opened or peeked it), `⟳ working`, `✗ stopped`,
 then the rest of the week. Muted, scripted (`claude -p`, `codex exec`) and subagent
 sessions stay out of it; `/` searches everything. `g` switches to one section per
 machine, each with its own page. Select
