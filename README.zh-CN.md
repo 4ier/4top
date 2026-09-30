@@ -134,6 +134,43 @@ tmux 服务里（`4top-agents`，与你自己的 tmux 分开），面板的 ssh 
 主机上，agent 仍在 ssh 会话里运行。本机的会话仍在面板自己的布局里打开，但已经常驻在本机的
 （从另一台设备打开的）会被接入，而不是再启动一个。
 
+## 手机通知
+
+可选、按主机开启、不需要常驻进程：agent 在需要你或完成时本来就会调用外部程序，
+`4top notify --install` 把这些调用接到 4top，由它向你手机订阅的 [ntfy](https://ntfy.sh)
+主题发一条消息。
+
+```sh
+4top notify --install     # 接好本机的 agent，并打印要订阅的主题
+4top notify --test        # 发一条测试消息
+4top notify --uninstall   # 只移除 --install 加上的内容
+```
+
+没有配置主题时，`--install` 在公共的 ntfy.sh 上生成一个随机主题，并写入本机配置的
+`[notify] url`；`--url` 可以指定你自己的（自建服务器，或者让每台主机用同一个主题）。
+在 ntfy 安卓 App 里点 **+**，订阅它打印的主题。每台主机都要各自运行一次：通知由各自
+主机上的 hook 发出。`--agent claude`（可重复）只接入或移除指定的 agent。
+
+消息标题是 `主机 · 项目`，正文是面板里同样叫法的状态，加上 agent 说的话和你最近的请求：
+
+- **Needs you (permission / question)**，高优先级：Claude Code 请求运行工具或向你提问
+  （`Notification` hook）；Pi 扩展弹出的提示。
+- **Done**：这一轮结束（Claude Code `Stop`、Codex `notify`、Pi `agent_settled`）。
+  Codex 只把结束的回合告诉 notify 程序，所以 Codex 不会发 “needs you”。
+- **Error**：这一轮失败（Claude Code `StopFailure`、Pi 报错）。
+
+接入的位置：Claude Code `settings.json` 里的 hooks，Codex `config.toml` 顶层的 `notify`
+程序（Codex 原有的 notify 程序会继续运行：4top 先调用它），以及 Pi `extensions/` 里的一个
+扩展文件。每个文件第一次修改前会复制为 `*.4top-backup`；不是 4top 写的条目一律不动。
+hook 立即返回，由一个脱离的子进程发送，最多等五秒，所以服务器不可达也不会拖住或弄坏
+agent。重复会被丢弃：同一会话十分钟内相同的消息，或二十秒内的任何消息（除非它刚刚变成
+需要你）。脚本启动的会话（`claude -p`、`codex exec`）和其他 agent 启动的会话不会通知
+（以主机上 session-ls 能区分出来为限）。
+
+在公共服务器上，主题是唯一的秘密：知道它的人可以读到这些消息（主机名、项目名、请求和
+agent 的最后一句话），也可以往里发。点通知打开的是 ntfy 而不是 Termux：ntfy 只能打开链接，
+而 Termux 没有注册能打开它的链接（只有广播给 Tasker 这类自动化 App 才行）。
+
 ## 命令行
 
 ```sh
@@ -148,6 +185,7 @@ tmux 服务里（`4top-agents`，与你自己的 tmux 分开），面板的 ssh 
 4top resume h_<key> --yes                 # 把这个进程换成该 agent
 4top attach h_<key>                       # 本机专用 tmux 里的 agent；没有就先启动
 4top new codex --resident                 # 新 agent 也常驻在那里
+4top notify --install                     # 通过 ntfy 推送通知（见上文）
 4top doctor --json
 ```
 
@@ -168,7 +206,8 @@ tmux 服务里（`4top-agents`，与你自己的 tmux 分开），面板的 ssh 
 
 本地状态保持私有：`$XDG_STATE_HOME/4top` 里只有本机身份和上次选中项，
 `$XDG_CACHE_HOME/4top` 是可重建的元数据缓存。不保留环境变量值、prompt 文本或转录内容。
-网络访问只有你配置的 ssh，以及每天一次的 PyPI 更新检查（`[ui] update_check = false` 可关闭）。标题和路径本身可能敏感，录屏前仍需检查。
+网络访问只有你配置的 ssh，以及每天一次的 PyPI 更新检查（`[ui] update_check = false` 可关闭）；
+开启通知后，每条通知再向你的 ntfy 主题发一次 POST（`[notify] events` 可只选部分状态）。标题和路径本身可能敏感，录屏前仍需检查。
 
 [完整操作与退出码](docs/troubleshooting.md) · [隐私](docs/privacy.md) ·
 [贡献](CONTRIBUTING.md) · [兼容性](docs/compatibility.md)

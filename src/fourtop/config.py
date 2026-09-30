@@ -14,6 +14,10 @@ from .errors import FourtopError
 
 ROOT_ENV = {"codex": "CODEX_HOME", "claude": "CLAUDE_CONFIG_DIR", "pi": "PI_CODING_AGENT_DIR"}
 HOST_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}\Z")
+# An ntfy topic URL: a server and one topic. On a public server the topic is the
+# only secret, so it is random and long.
+NOTIFY_URL_RE = re.compile(r"https?://[^/\s?#@]+(?:/[^/\s?#]+)*/[-_A-Za-z0-9]{1,64}\Z")
+NOTIFY_EVENTS = ("needs-you", "done", "error")
 
 
 def _absolute(value: str) -> Path:
@@ -91,6 +95,8 @@ class Config:
     layout: str = "auto"  # auto | tmux | plain
     rows_per_host: int = 0  # 0: fit the panel's height
     update_check: bool = True  # one daily request to PyPI's index; see fourtop.update
+    notify_url: str = ""  # "": no push notifications; see fourtop.notify
+    notify_events: tuple[str, ...] = NOTIFY_EVENTS
 
     def root(self, agent: str) -> Root:
         return next(root for root in self.roots if root.agent == agent)
@@ -126,17 +132,19 @@ class Config:
                 raise FourtopError("Explicit configuration file was not found", 2) from None
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise FourtopError(f"Cannot read configuration: {type(exc).__name__}", 2) from None
-        allowed = {"ui", "history", "agents", "hosts"}
+        allowed = {"ui", "history", "agents", "hosts", "notify"}
         if set(data) - allowed:
             raise FourtopError("Unknown configuration section: " + ", ".join(sorted(set(data) - allowed)), 2)
         for key in allowed:
             if not isinstance(data.get(key, {}), dict):
                 raise FourtopError(f"[{key}] must be a TOML table", 2)
-        ui, history, agents, hosts = (data.get(name, {}) for name in ("ui", "history", "agents", "hosts"))
+        ui, history, agents, hosts, notify = (data.get(name, {}) for name in
+                                              ("ui", "history", "agents", "hosts", "notify"))
         for section, values, permitted in (
             ("ui", ui, {"refresh_seconds", "history_refresh_seconds", "color", "layout",
                         "rows_per_host", "update_check"}),
             ("history", history, {"metadata_max_bytes", "metadata_max_lines", "preview_max_lines"}),
+            ("notify", notify, {"url", "events"}),
         ):
             if set(values) - permitted:
                 raise FourtopError(f"Unknown option in [{section}]: " + ", ".join(sorted(set(values) - permitted)), 2)
@@ -175,6 +183,13 @@ class Config:
         layout = ui.get("layout", "auto")
         if layout not in ("auto", "tmux", "plain"):
             raise FourtopError("ui.layout must be auto, tmux or plain", 2)
+        notify_url = notify.get("url", "")
+        if notify and (not isinstance(notify_url, str) or not NOTIFY_URL_RE.match(notify_url)):
+            raise FourtopError("notify.url must be an ntfy topic URL, e.g. https://ntfy.sh/TOPIC", 2)
+        events = notify.get("events", list(NOTIFY_EVENTS))
+        if (not isinstance(events, list) or not events
+                or not all(isinstance(event, str) and event in NOTIFY_EVENTS for event in events)):
+            raise FourtopError("notify.events must list some of: " + ", ".join(NOTIFY_EVENTS), 2)
         return cls(state, cache, roots, executables, env,
                    _number(ui, "refresh_seconds", 1.0, 0.1),
                    _number(ui, "history_refresh_seconds", 5.0, 0.1),
@@ -182,4 +197,5 @@ class Config:
                    _number(history, "metadata_max_lines", 2000, 1, True),
                    _number(history, "preview_max_lines", 200, 1, True), color, str(config_file),
                    {name: _host(name, options) for name, options in hosts.items()},
-                   agent_args, layout, _number(ui, "rows_per_host", 0, 0, True), update_check)
+                   agent_args, layout, _number(ui, "rows_per_host", 0, 0, True), update_check,
+                   notify_url, tuple(dict.fromkeys(events)))

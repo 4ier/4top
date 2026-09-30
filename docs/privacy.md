@@ -4,6 +4,11 @@
 crash-report upload. The panel asks PyPI's index at most once a day whether a newer
 4top exists; the request carries only the project name, and
 `[ui] update_check = false` turns it off. Pure browsing/searching stays local.
+Push notifications are off until `4top notify --install`; then each message is one
+POST to the ntfy topic you configured, carrying the host and project names, the
+session's state, the agent's last words or question and your latest request. On a
+public ntfy server the topic name is the only protection: anyone who knows it can
+read and send. Use your own server (`--url`) if that is too much.
 Agent `--help`/`--version` probes are invoked for diagnostics and runtime planning;
 the original CLI's own behavior and settings still apply.
 
@@ -13,7 +18,8 @@ Symlink traversal below those roots and FIFOs/nonregular files are rejected.
 Authentication files are not included in discovery. Full-content search is explicit.
 
 Caches contain titles and project paths and are therefore sensitive. Private state
-contains a local identity and your last selection, and nothing else: no run IDs, no
+contains a local identity, your last selection and, with notifications on, when
+each session was last reported (key, state, a digest of the message), and nothing else: no run IDs, no
 process identity, no environment values, no native argument arrays, no prompt
 arguments, no search bodies and no terminal scrollback.
 

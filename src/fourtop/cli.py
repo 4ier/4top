@@ -11,7 +11,7 @@ from session_ls.api import clean_text
 from session_ls.storage import StorageError
 
 from . import __version__
-from .config import Config
+from .config import NOTIFY_URL_RE, Config
 from .errors import Conflict, Dependency, FourtopError
 from .models import ROW_SCHEMA, LaunchPlan, age
 from .services import DemoManager, Manager
@@ -26,6 +26,7 @@ COMMANDS = (
     ("resume", "Resume one exact session as a new process"),
     ("attach", "Show a session's agent kept on this host, starting it if needed"),
     ("doctor", "Read dependency and source diagnostics"),
+    ("notify", "Push notifications to a phone through ntfy (opt-in)"),
 )
 
 
@@ -85,6 +86,19 @@ def parser() -> argparse.ArgumentParser:
         if command == "attach":
             sub.add_argument("key", help="Stable key / unique native ID prefix; never a row number")
             sub.add_argument("--cwd", help="Explicit override for a historical working directory")
+        if command == "notify":
+            action = sub.add_mutually_exclusive_group(required=True)
+            action.add_argument("--install", action="store_true",
+                                help="Wire this host's Claude Code, Codex and Pi to notify")
+            action.add_argument("--uninstall", action="store_true",
+                                help="Remove exactly what --install added")
+            action.add_argument("--test", action="store_true", help="Send a test message")
+            action.add_argument("--from-hook", choices=("claude", "codex", "pi"), metavar="AGENT",
+                                help="What an agent's hook runs; always exits 0")
+            sub.add_argument("--agent", action="append", choices=("claude", "codex", "pi"),
+                             help="With --install/--uninstall: only this agent (repeatable)")
+            sub.add_argument("--url", help="With --install: an ntfy topic URL instead of a new "
+                                           "random topic on ntfy.sh")
     return ap
 
 
@@ -268,6 +282,24 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
                 return _exec(manager.remote_argv(["attach", args.key]
                                                  + (["--cwd", args.cwd] if args.cwd else [])))
             return _hand_over(manager, manager.attach(args.key, args.cwd))
+        if command == "notify":
+            from . import notify
+            flag = next(name for name in ("install", "uninstall", "test") if getattr(args, name))
+            if manager.remote:  # the hooks and the topic belong to that host
+                return _exec(manager.remote_argv(
+                    ["notify", "--" + flag] + (["--url", args.url] if args.url else [])
+                    + [word for agent in args.agent or () for word in ("--agent", agent)]))
+            if args.url and (flag != "install" or not NOTIFY_URL_RE.match(args.url)):
+                raise FourtopError("--url takes an ntfy topic URL, with --install", 2)
+            if flag == "test":
+                print(notify.test(manager.config))
+                return 0
+            report = (notify.install(manager.config, args.config, args.url, agents=args.agent)
+                      if flag == "install" else notify.uninstall(manager.config, args.agent))
+            print("\n".join(report))
+            if flag == "install":
+                print("\n" + notify.subscribe_help(manager.config.notify_url))
+            return 0
         raise FourtopError("Unknown operation", 2)
     finally:
         manager.close()
@@ -281,6 +313,10 @@ def main(argv: list[str] | None = None) -> int:
         extra, arguments = tuple(arguments[index + 1:]), arguments[:index]
     ap = parser()
     args = ap.parse_args(arguments)
+    if args.command == "notify" and args.from_hook:
+        # Inside an agent's turn: never an error, never a wait, nothing on stdout.
+        from .notify import from_hook
+        return from_hook(args.config, args.from_hook, extra)
     if extra and args.command != "new":
         ap.error("Only `new` accepts native agent arguments after --")
     try:
