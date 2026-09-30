@@ -560,13 +560,14 @@ def pi(extensions: Path, argv: list[str] | None) -> str:
 
 # --- the commands --------------------------------------------------------------------
 
-def targets(config: Config) -> dict[str, Path]:
-    """Each agent's file, for the agents whose store exists on this host."""
+def targets(config: Config, agents=None) -> dict[str, Path]:
+    """Each agent's file, for the agents whose store exists on this host (of those
+    asked for, if any were)."""
     found = {}
     for agent, relative in (("claude", "settings.json"), ("codex", "config.toml"),
                             ("pi", "extensions")):
         root = Path(config.root(agent).path)
-        if root.is_dir():
+        if root.is_dir() and (not agents or agent in agents):
             found[agent] = root / relative
     return found
 
@@ -587,7 +588,7 @@ def record_url(config: Config, url: str) -> None:
 
 
 def install(config: Config, config_path: str | None, url: str | None = None,
-            base: list[str] | None = None) -> list[str]:
+            base: list[str] | None = None, agents=None) -> list[str]:
     report = []
     if not config.notify_url:
         config.notify_url = url or new_url()
@@ -600,14 +601,14 @@ def install(config: Config, config_path: str | None, url: str | None = None,
         report.append(f"topic: {config.notify_url}")
     base = base or launcher(config.environment)
     wiring = {"claude": claude, "codex": codex, "pi": pi}
-    for agent, path in targets(config).items():
+    for agent, path in targets(config, agents).items():
         report.append(wiring[agent](path, hook_argv(base, config_path, agent)))
     return report
 
 
-def uninstall(config: Config) -> list[str]:
+def uninstall(config: Config, agents=None) -> list[str]:
     wiring = {"claude": claude, "codex": codex, "pi": pi}
-    return [wiring[agent](path, None) for agent, path in targets(config).items()]
+    return [wiring[agent](path, None) for agent, path in targets(config, agents).items()]
 
 
 def subscribe_help(url: str) -> str:

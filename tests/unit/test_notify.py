@@ -325,6 +325,9 @@ def test_install_records_a_random_topic_and_wires_the_agents_present(lab, capsys
     # A second install keeps the topic; uninstall leaves the agents as they were.
     assert main(["--config", str(lab.config_file), "notify", "--install"]) == 0
     assert Config.load(str(lab.config_file), environment=lab.env).notify_url == config.notify_url
+    assert main(["--config", str(lab.config_file), "notify", "--uninstall", "--agent", "codex"]) == 0
+    assert "notify" not in tomllib.loads((home / ".codex/config.toml").read_text())
+    assert "hooks" in json.loads((home / ".claude/settings.json").read_text())
     assert main(["--config", str(lab.config_file), "notify", "--uninstall"]) == 0
     assert json.loads((home / ".claude/settings.json").read_text()) == {}
     assert "notify" not in tomllib.loads((home / ".codex/config.toml").read_text())

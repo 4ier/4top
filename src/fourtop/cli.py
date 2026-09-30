@@ -95,6 +95,8 @@ def parser() -> argparse.ArgumentParser:
             action.add_argument("--test", action="store_true", help="Send a test message")
             action.add_argument("--from-hook", choices=("claude", "codex", "pi"), metavar="AGENT",
                                 help="What an agent's hook runs; always exits 0")
+            sub.add_argument("--agent", action="append", choices=("claude", "codex", "pi"),
+                             help="With --install/--uninstall: only this agent (repeatable)")
             sub.add_argument("--url", help="With --install: an ntfy topic URL instead of a new "
                                            "random topic on ntfy.sh")
     return ap
@@ -284,15 +286,16 @@ def execute(args, extra: tuple[str, ...] = ()) -> int:
             from . import notify
             flag = next(name for name in ("install", "uninstall", "test") if getattr(args, name))
             if manager.remote:  # the hooks and the topic belong to that host
-                return _exec(manager.remote_argv(["notify", "--" + flag]
-                                                 + (["--url", args.url] if args.url else [])))
+                return _exec(manager.remote_argv(
+                    ["notify", "--" + flag] + (["--url", args.url] if args.url else [])
+                    + [word for agent in args.agent or () for word in ("--agent", agent)]))
             if args.url and (flag != "install" or not NOTIFY_URL_RE.match(args.url)):
                 raise FourtopError("--url takes an ntfy topic URL, with --install", 2)
             if flag == "test":
                 print(notify.test(manager.config))
                 return 0
-            report = (notify.install(manager.config, args.config, args.url) if flag == "install"
-                      else notify.uninstall(manager.config))
+            report = (notify.install(manager.config, args.config, args.url, agents=args.agent)
+                      if flag == "install" else notify.uninstall(manager.config, args.agent))
             print("\n".join(report))
             if flag == "install":
                 print("\n" + notify.subscribe_help(manager.config.notify_url))

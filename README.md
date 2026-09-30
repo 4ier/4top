@@ -207,7 +207,8 @@ Without a configured topic, `--install` makes a random one on the public ntfy.sh
 records it as `[notify] url` in this host's configuration; `--url` names your own
 (a self-hosted server, or the same topic on every host). In the ntfy Android app, tap
 **+** and subscribe to the topic it prints. Run it on each host: every host's hooks
-send from that host.
+send from that host. `--agent claude` (repeatable) wires or unwires only the agents
+named.
 
 A message is titled `host · project` and says the state, as the panel names it,
 with what the agent said and your latest request:
