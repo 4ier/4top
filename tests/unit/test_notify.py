@@ -97,12 +97,19 @@ def test_hook_payloads_become_states():
     assert notify.parse("claude", {**base, "hook_event_name": "Stop", "agent_id": "sub"}) is None
     assert notify.parse("claude", {**base, "hook_event_name": "StopFailure",
                                    "error_type": "rate_limit"}).detail == "rate_limit"
+    # As Claude Code 2.1.280 really sends it (captured on ubuntu, not logged in).
+    assert notify.parse("claude", {**base, "hook_event_name": "StopFailure",
+                                   "error": "authentication_failed",
+                                   "last_assistant_message": "Failed to authenticate."}).detail \
+        == "authentication_failed — Failed to authenticate."
     codex = notify.parse("codex", {"type": "agent-turn-complete", "thread-id": NATIVE, "cwd": "/w",
                                    "input-messages": ["first", "latest ask"],
                                    "last-assistant-message": "Done it."})
     assert (codex.state, codex.request, codex.detail) == ("done", "latest ask", "Done it.")
     assert notify.parse("codex", {"type": "something-else"}) is None
     assert notify.parse("pi", {"event": "prompt", "title": "Pick one"}).state == "needs-you"
+    assert notify.parse("pi", {"event": "prompt", "title": "", "kind": "custom"}) is None
+    assert notify.parse("pi", {"event": "prompt", "title": ""}) is None   # an older extension
     assert notify.parse("pi", {"event": "error", "error": "429"}).detail == "429"
     assert notify.parse("pi", "not a dict") is None
 

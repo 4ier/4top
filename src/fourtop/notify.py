@@ -125,8 +125,12 @@ def parse(agent: str, payload: dict) -> Event | None:
         if name == "Stop":
             return Event(agent, "done", detail=str(payload.get("last_assistant_message") or ""), **base)
         if name == "StopFailure":
-            return Event(agent, "error", detail=str(payload.get("error_message")
-                                                    or payload.get("error_type") or ""), **base)
+            # Claude Code 2.1.280 sends `error` and `last_assistant_message`; its docs
+            # name `error_type` and `error_message`. Either is read.
+            kind = str(payload.get("error") or payload.get("error_type") or "")
+            words = str(payload.get("error_message") or payload.get("last_assistant_message") or "")
+            return Event(agent, "error", detail=" — ".join(part for part in (kind, words) if part),
+                         **base)
         return None
     if agent == "codex":
         kind = payload.get("type")
@@ -143,6 +147,10 @@ def parse(agent: str, payload: dict) -> Event | None:
     if agent == "pi":
         state = {"prompt": "needs-you", "done": "done", "error": "error"}.get(payload.get("event"))
         if state is None:
+            return None
+        if state == "needs-you" and payload.get("kind") in ("custom", None) and not payload.get("title"):
+            # An untitled panel of some extension's own: seen on ubuntu while a turn
+            # was retrying, asking the person nothing.
             return None
         detail = payload.get("title") if state == "needs-you" else (
             payload.get("error") if state == "error" else payload.get("text"))
@@ -532,7 +540,8 @@ export default function (pi: any) {{
     if (text) lastText = text;
     if (message.stopReason === "error") failed = String(message.errorMessage ?? "error");
   }});
-  pi.on("ui_prompt_start", (event: any, ctx: any) => send("prompt", ctx, {{ title: event?.title ?? "" }}));
+  pi.on("ui_prompt_start", (event: any, ctx: any) =>
+    send("prompt", ctx, {{ title: event?.title ?? "", kind: event?.kind ?? "" }}));
   pi.on("agent_settled", (_event: any, ctx: any) => {{
     settledSeen = true;
     send(failed ? "error" : "done", ctx);
